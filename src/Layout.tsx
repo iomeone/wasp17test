@@ -28,15 +28,7 @@ export function Layout() {
 
   return (
     <HeroUIProvider>
-      <div className="text-foreground bg-background min-h-screen">
-        <Navbar>
-          <NavbarBrand>
-            <p className="font-bold text-inherit">11Ask The Documents</p>
-          </NavbarBrand>
-          <NavbarContent justify="end">
-            <NavbarItem>{ logoutButton}</NavbarItem>
-          </NavbarContent>
-        </Navbar>
+      <div>
         <Outlet />
       </div>
     </HeroUIProvider>
