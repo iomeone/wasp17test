@@ -13,3 +13,17 @@ route RootRoute { path: "/", to: MainPage }
 page MainPage {
   component: import { Main } from "@src/pages/MainPage"
 }
+
+
+
+route DashboardPage  { path: "/dashboard", to: DashboardPage }
+page DashboardPage  {
+  component: import { Dashboard  } from "@src/pages/DashboardPage"
+}
+
+
+
+route SettingsPage  { path: "/settings", to: SettingsPage  }
+page SettingsPage  {
+  component: import { Settings  } from "@src/pages/SettingsPage"
+}

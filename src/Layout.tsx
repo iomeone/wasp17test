@@ -9,6 +9,10 @@ import {
   Button,
 } from "@heroui/react";
 import { Outlet } from "react-router-dom";
+
+
+
+import { Sidebar } from "./components/Sidebar";
 import "./Main.css";
 
 export function Layout() {
@@ -28,8 +32,11 @@ export function Layout() {
 
   return (
     <HeroUIProvider>
-      <div>
-        <Outlet />
+      <div className="flex"> 
+        <Sidebar />
+        <main className="flex-grow p-8"> 
+          <Outlet /> 
+        </main>
       </div>
     </HeroUIProvider>
   );
