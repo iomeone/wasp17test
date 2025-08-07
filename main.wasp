@@ -16,6 +16,13 @@ page MainPage {
 
 
 
+route MapPage  { path: "/Map", to: MapPage  }
+page MapPage  {
+  component: import { Map  } from "@src/pages/Map"
+}
+
+
+
 route DashboardPage  { path: "/dashboard", to: DashboardPage }
 page DashboardPage  {
   component: import { Dashboard  } from "@src/pages/DashboardPage"

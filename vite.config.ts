@@ -1,5 +1,10 @@
 import { defineConfig } from 'vite'
 
+import rollupWGSL from "@use-gpu/wgsl-loader/rollup";
+import wasm from "vite-plugin-wasm";
+
+
+
 export default defineConfig({
   server: {
 
@@ -13,4 +18,21 @@ export default defineConfig({
 
     open: true,
   },
+
+
+
+ resolve: {
+    // 硬性去重
+    dedupe: ['react', 'react-dom']
+  },
+  optimizeDeps: {
+    // 不要把这几个包预打包成它们自己带的 React
+    exclude: ['@use-gpu/react', '@use-gpu/live']
+  },
+
+
+    plugins: [
+    rollupWGSL(),
+     wasm()
+  ],
 })

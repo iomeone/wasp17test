@@ -3,6 +3,16 @@
   "type": "module",
   "dependencies": {
     "@heroui/react": "2.7.5",
+    "@use-gpu/inspect": "^0.16.0",
+    "@use-gpu/inspect-gpu": "^0.16.0",
+    "@use-gpu/interact": "^0.16.0",
+    "@use-gpu/plot": "^0.16.0",
+    "@use-gpu/react": "^0.16.0",
+    "@use-gpu/scene": "^0.16.0",
+    "@use-gpu/shader": "^0.16.0",
+    "@use-gpu/webgpu": "^0.16.0",
+    "@use-gpu/wgsl-loader": "^0.16.0",
+    "@use-gpu/workbench": "^0.16.0",
     "axios": "^1.4.0",
     "cheerio": "1.0.0-rc.12",
     "framer-motion": "^12.6.2",
@@ -14,6 +24,7 @@
     "react-hook-form": "^7.45.4",
     "react-markdown": "^8.0.7",
     "react-router-dom": "^6.26.2",
+    "vite-plugin-wasm": "^3.5.0",
     "wasp": "file:.wasp/out/sdk/wasp"
   },
   "devDependencies": {

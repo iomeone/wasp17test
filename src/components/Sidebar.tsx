@@ -21,6 +21,12 @@ export function Sidebar() {
         <ListboxItem key="/" textValue="Home"> {/* 路由路径作为 key */}
           Home
         </ListboxItem>
+        
+        <ListboxItem key="/map" textValue="Map"> {/* 路由路径作为 key */}
+          Map
+        </ListboxItem>
+
+
         <ListboxItem key="/dashboard" textValue="Dashboard"> {/* 路由路径作为 key */}
           Dashboard
         </ListboxItem>
