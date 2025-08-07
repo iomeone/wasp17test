@@ -344,7 +344,11 @@ const useGoogle3DTile = (lat: number, lon: number) => {
                 // setStatus(`使用最详细路径 ${bestPath}，正在下载...`);
                 
                 // 如果需要切换到最低层级，请使用下面这行代码替换上面两行
-                const bestPath = allPaths.reduce((a, b) => a.length < b.length ? a : b);
+                // const bestPath = allPaths.reduce((a, b) => a.length < b.length ? a : b);
+
+
+                const bestPath = allPaths.find(path => path.length === 10);
+
                 setStatus(`使用最低层级路径 ${bestPath}，正在下载...`);
 
                 const planetoid = await utils.getPlanetoid();
@@ -496,7 +500,7 @@ const Camera = ({children, initialCenter, initialRadius}: CameraProps) => (
 export const MapGpu: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
     // 从 Hook 中获取 center 和 radius
     const { meshes, status, center, radius } = useGoogle3DTile(37.795, -122.402);
-    // console.log(status, size);
+    console.log(37.795, -122.402);
 
     const textureUrls = useMemo(() => meshes.map(m => m.textureUrl), [meshes]);
     
