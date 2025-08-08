@@ -347,7 +347,12 @@ const useGoogle3DTile = (lat: number, lon: number) => {
                 // const bestPath = allPaths.reduce((a, b) => a.length < b.length ? a : b);
 
 
-                const bestPath = allPaths.find(path => path.length === 10);
+                const bestPath = allPaths.find(path => path.length === 18);
+
+                if (!bestPath) {
+                    console.error("在 allPaths 数组中未找到长度为18的路径");
+                    return;
+                }
 
                 setStatus(`使用最低层级路径 ${bestPath}，正在下载...`);
 
