@@ -324,6 +324,13 @@ const useGoogle3DTile = (lat: number, lon: number) => {
     const [meshes, setMeshes] = useState<ProcessedMesh[]>([]);
     const [status, setStatus] = useState('正在初始化...');
 
+
+    useResource(() => {
+        console.log(status);
+        return () => {}; 
+    }, [status]);
+
+
     useResource((dispose) => {
         let isCancelled = false;
         const loadData = async () => {
