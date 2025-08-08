@@ -222,87 +222,102 @@ const processMesh = (mesh: MeshPayload, transformMatrix: Float64Array): Omit<Pro
         worldVertices[j + 2] = x * transformMatrix[2] + y * transformMatrix[6] + z * transformMatrix[10] + transformMatrix[14];
     }
     
-    // 2. 处理 UV 坐标 (逻辑不变)
-    const uvs = new Float32Array(rawVertices.length / 8 * 2);
-    if (mesh.uvOffsetAndScale && mesh.texture) {
-        for (let i = 0, j = 0; i < rawVertices.length; i += 8, j += 2) {
-            const u = rawVertices[i + 5] * 256 + rawVertices[i + 4];
-            const v = rawVertices[i + 7] * 256 + rawVertices[i + 6];
-            const ut = (u + mesh.uvOffsetAndScale[0]) * mesh.uvOffsetAndScale[2];
-            let vt = (v + mesh.uvOffsetAndScale[1]) * mesh.uvOffsetAndScale[3];
-            uvs[j] = ut;
-            uvs[j + 1] = mesh.texture.textureFormat === 6 ? 1 - vt : vt;
-        }
+   
+
+// === 2) 处理 UV 坐标（总是计算，与纹理格式无关）===
+const uvs = new Float32Array(rawVertices.length / 8 * 2);
+
+// 预扫最大 u/v，用于无 uvOffsetAndScale 时反推 uMod/vMod
+let uMax = 0, vMax = 0;
+for (let i = 0; i < rawVertices.length; i += 8) {
+  const u = rawVertices[i + 5] * 256 + rawVertices[i + 4];
+  const v = rawVertices[i + 7] * 256 + rawVertices[i + 6];
+  if (u > uMax) uMax = u;
+  if (v > vMax) vMax = v;
+}
+
+if (mesh.uvOffsetAndScale && mesh.texture) {
+  // 有 uvOffsetAndScale：直接套用
+  const [offX, offY, sclX, sclY] = mesh.uvOffsetAndScale;
+  for (let i = 0, j = 0; i < rawVertices.length; i += 8, j += 2) {
+    const u = rawVertices[i + 5] * 256 + rawVertices[i + 4];
+    const v = rawVertices[i + 7] * 256 + rawVertices[i + 6];
+    uvs[j]     = (u + offX) * sclX;
+    uvs[j + 1] = (v + offY) * sclY;
+  }
+} else {
+  // 无 uvOffsetAndScale：使用 C++ 的“默认 + 翻V”分支
+  const uMod = uMax + 1;
+  const vMod = vMax + 1;
+
+  const offX = 0.5;
+  const offY = 0.5 - 1 / vMod; // 关键：翻 V
+  const sclX = 1 / uMod;
+  const sclY = -1 / vMod;      // 关键：翻 V（负号）
+
+  for (let i = 0, j = 0; i < rawVertices.length; i += 8, j += 2) {
+    const u = rawVertices[i + 5] * 256 + rawVertices[i + 4];
+    const v = rawVertices[i + 7] * 256 + rawVertices[i + 6];
+    uvs[j]     = (u + offX) * sclX;
+    uvs[j + 1] = (v + offY) * sclY;
+  }
+}
+
+// === 3) 清洗索引：先按 layerBounds[3] 截断，再做 strip->list 与剔除 ===
+const listIndices: number[] = [];
+let culledDegenerateCount = 0;
+let culledOctantCount = 0;
+
+// 和 C++ 对齐：有效 strip 长度 = layerBounds[3]
+const effectiveStripLen = Math.min(
+  stripIndices.length,
+  (mesh.layerBounds && mesh.layerBounds[3] != null) ? mesh.layerBounds[3] : stripIndices.length
+);
+
+for (let i = 0; i < effectiveStripLen - 2; i++) {
+  const i1 = stripIndices[i];
+  const i2 = stripIndices[i + 1];
+  const i3 = stripIndices[i + 2];
+
+  // 退化三角
+  if (i1 === i2 || i1 === i3 || i2 === i3) {
+    if (culledDegenerateCount < 5) {
+      console.warn(`[剔除日志] 退化三角 i=${i} -> (${i1}, ${i2}, ${i3})`);
     }
+    culledDegenerateCount++;
+    continue;
+  }
 
-    // 3. 清洗索引数据
-    const listIndices: number[] = [];
-    let culledDegenerateCount = 0;
-    let culledOctantCount = 0;
-
-    for (let i = 0; i < stripIndices.length - 2; i++) {
-        const i1 = stripIndices[i];
-        const i2 = stripIndices[i + 1];
-        const i3 = stripIndices[i + 2];
-
-        // ======================================================
-        // ==           日志请求 1: 打印剔除行为             ==
-        // ======================================================
-        if (i1 === i2 || i1 === i3 || i2 === i3) {
-            if (culledDegenerateCount < 5) { // 只打印前5条，避免刷屏
-                console.warn(`[剔除日志] 发现退化三角形 (索引 ${i})，顶点索引为 (${i1}, ${i2}, ${i3})，已剔除。`);
-            }
-            culledDegenerateCount++;
-            continue;
-        }
-
-        const octant1 = rawVertices[i1 * 8 + 3];
-        const octant2 = rawVertices[i2 * 8 + 3];
-        const octant3 = rawVertices[i3 * 8 + 3];
-        
-        if (octant1 !== octant2 || octant2 !== octant3) {
-            if (culledOctantCount < 5) { // 只打印前5条
-                 console.warn(`[剔除日志] 发现跨区三角形 (索引 ${i})，octant值为 (${octant1}, ${octant2}, ${octant3})，已剔除。`);
-            }
-            culledOctantCount++;
-            continue;
-        }
-
-        // 修正缠绕顺序
-        if (i % 2 === 0) {
-            listIndices.push(i1, i2, i3);
-        } else {
-            listIndices.push(i1, i3, i2);
-        }
+  // 剔除跨 octant
+  const o1 = rawVertices[i1 * 8 + 3];
+  const o2 = rawVertices[i2 * 8 + 3];
+  const o3 = rawVertices[i3 * 8 + 3];
+  if (o1 !== o2 || o2 !== o3) {
+    if (culledOctantCount < 5) {
+      console.warn(`[剔除日志] 跨 Octant 三角 i=${i} -> (${i1}, ${i2}, ${i3}) oct=(${o1},${o2},${o3})`);
     }
+    culledOctantCount++;
+    continue;
+  }
 
-    console.log(`[剔除总结] 共剔除 ${culledDegenerateCount} 个退化三角形, ${culledOctantCount} 个跨区三角形。`);
-    
-    // ======================================================
-    // ==         日志请求 2: 抽样打印10个结果三角形         ==
-    // ======================================================
-    console.log("--- 清洗后顶点数据抽样 (前10个三角形) ---");
-    const finalIndices = new Uint16Array(listIndices);
-    const numTrianglesToLog = Math.min(10, finalIndices.length / 3);
-    if (numTrianglesToLog > 0) {
-        for (let i = 0; i < numTrianglesToLog; i++) {
-            const index1 = finalIndices[i * 3];
-            const index2 = finalIndices[i * 3 + 1];
-            const index3 = finalIndices[i * 3 + 2];
+  // strip -> list，保持与 OpenGL TRIANGLE_STRIP 一致的缠绕奇偶翻转
+  if (i % 2 === 0) {
+    listIndices.push(i1, i2, i3);
+  } else {
+    listIndices.push(i1, i3, i2);
+  }
+}
 
-            const vert1: vec3 = [worldVertices[index1 * 3], worldVertices[index1 * 3 + 1], worldVertices[index1 * 3 + 2]];
-            const vert2: vec3 = [worldVertices[index2 * 3], worldVertices[index2 * 3 + 1], worldVertices[index2 * 3 + 2]];
-            const vert3: vec3 = [worldVertices[index3 * 3], worldVertices[index3 * 3 + 1], worldVertices[index3 * 3 + 2]];
+const finalIndices = new Uint16Array(listIndices);
 
-            console.log(`▼ 清洗后三角形 ${i}:`);
-            console.log(`  - 顶点 (索引 ${index1}): [${vert1[0].toFixed(2)}, ${vert1[1].toFixed(2)}, ${vert1[2].toFixed(2)}]`);
-            console.log(`  - 顶点 (索引 ${index2}): [${vert2[0].toFixed(2)}, ${vert2[1].toFixed(2)}, ${vert2[2].toFixed(2)}]`);
-            console.log(`  - 顶点 (索引 ${index3}): [${vert3[0].toFixed(2)}, ${vert3[1].toFixed(2)}, ${vert3[2].toFixed(2)}]`);
-        }
-    } else {
-        console.log("清洗后已无有效三角形可供抽样。");
-    }
-    console.log("---------------------------------");
+// （可选）简单统计
+console.log(`[索引统计] 输入 stripLen=${stripIndices.length}, 有效 stripLen=${effectiveStripLen}, 输出 tris=${finalIndices.length / 3}, 退化剔除=${culledDegenerateCount}, 跨oct剔除=${culledOctantCount}`);
+
+
+
+
+
+
 
 
     return {
