@@ -657,13 +657,61 @@ export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: numbe
 };
 
 
+
+
+// ===================== BFS 邻居加载（同父） =====================
+// 返回“同父”的 8 邻：左右、上下、四个对角（不跨父）。跨父留到下一步。
+function getSameParent8Neighbors(path: string): string[] {
+  if (!path || path.length < 3) return [];
+  const parent = path.slice(0, -1);
+  const last   = path.charCodeAt(path.length - 1) - 48; // 0..7
+  const high   = last & 4;   // 高位不变（同父）
+  const base   = last & 3;   // 0..3: 0=SW,1=SE,2=NW,3=NE
+
+  // 同父四个子块的“坐标”:
+  //   2(NW) 3(NE)
+  //   0(SW) 1(SE)
+  const sw = high | 0, se = high | 1, nw = high | 2, ne = high | 3;
+
+  // 把当前块当作 (cx, cy)
+  // base: 0(SW)→(0,0), 1(SE)→(1,0), 2(NW)→(0,1), 3(NE)→(1,1)
+  const cx = (base & 1) ? 1 : 0;
+  const cy = (base & 2) ? 1 : 0;
+
+  // 在同父 2×2 内取 8 邻时，只有落在同父内的才有效
+  const idx = (x:number,y:number) => (x===0&&y===0)?sw:(x===1&&y===0)?se:(x===0&&y===1)?nw:ne;
+
+  const out: string[] = [];
+  const pushIfInside = (x:number,y:number) => {
+    if (x>=0 && x<=1 && y>=0 && y<=1) {
+      out.push(parent + String.fromCharCode(48 + idx(x,y)));
+    } else {
+      console.debug('[邻居][TODO cross-parent] 越界: 从', path, '想去', {x,y});
+    }
+  };
+
+  // 左右上下
+  pushIfInside(cx-1, cy);
+  pushIfInside(cx+1, cy);
+  pushIfInside(cx, cy-1);
+  pushIfInside(cx, cy+1);
+  // 4 对角
+  pushIfInside(cx-1, cy-1);
+  pushIfInside(cx+1, cy-1);
+  pushIfInside(cx-1, cy+1);
+  pushIfInside(cx+1, cy+1);
+
+  // 去重
+  return Array.from(new Set(out)).filter(p => p !== path);
+}
+
 const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel: number, rings: number) => {
   const [center, setCenter] = useState<vec3>([0, 0, 0]);
   const [radius, setRadius] = useState(500);
   const [meshes, setMeshes] = useState<ProcessedMesh[]>([]);
   const [status, setStatus] = useState('正在初始化...');
 
-  useResource((dispose) => {
+  useResource(() => {
     console.log('[状态]', status);
     return () => {};
   }, [status]);
@@ -673,11 +721,11 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
 
     const loadData = async () => {
       try {
-        setStatus('正在查找所有可用路径...');
+        setStatus(`准备查找路径与加载：level=${wantedLevel}, rings=${rings}`);
         const utils = initUtils({ URL_PREFIX: `https://kh.google.com/rt/earth/` });
         const pathFinder = initPathFinder(utils);
 
-        // 这里把 maxLevel 设得比较高，拿全，然后我们自己根据 wantedLevel 做选择
+        // 先取到 wantedLevel（或能找到的最接近）那一级的中心 path
         const allPaths = await pathFinder(lat, lon, Math.max(22, wantedLevel));
         if (isCancelled) return;
 
@@ -688,88 +736,149 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
 
         const maxFound = allPaths.reduce((m, p) => Math.max(m, p.length), 0);
         const effectiveLevel = Math.min(wantedLevel, maxFound);
-        const chosen =
+        const centerPath =
           allPaths.find(p => p.length === effectiveLevel) ||
           allPaths.reduce((best, p) => (p.length <= effectiveLevel && p.length > (best?.length ?? -1) ? p : best), '' as string);
 
-        console.log(`[层级选择] 想要 L${wantedLevel}，可用最大 L${maxFound}，实际使用 L${effectiveLevel}，path=${chosen}`);
+        if (!centerPath) throw new Error('未能选出中心 path');
 
-        if (!chosen) {
-          console.warn('[层级选择] 找不到合适路径，退回使用 allPaths 中最长者。');
+        console.log(`[层级选择] 想要 L${wantedLevel}，可用最大 L${maxFound}，实际使用 L${effectiveLevel}，center=${centerPath}`);
+        setStatus(`中心瓦片 L${effectiveLevel}：${centerPath}；开始 BFS 加载，rings=${rings}`);
+
+        // ======== BFS 队列 & 去重 ========
+        const visited = new Set<string>();
+        const queue: Array<{path:string, ring:number}> = [{ path: centerPath, ring: 0 }];
+        visited.add(centerPath);
+
+        // 负载保护：理论期望瓦片数 (2r+1)^2
+        const expected = (2 * rings + 1) ** 2;
+        const HARD_CAP = Math.min(expected * 1.5, 256);   // 安全上限
+        const MAX_CONCURRENCY = 4;                         // 并发抓取限制
+        console.log(`[BFS] 期望=${expected}，硬上限=${HARD_CAP}，并发=${MAX_CONCURRENCY}`);
+
+        // 一个简易的并发池
+        const pool: Promise<void>[] = [];
+        const extractedAll: ProcessedMesh[] = [];
+
+        // 工具：进入 bulk & 拉 node
+        async function fetchNode(path: string) {
+          // 逐级进 bulk 定位 index
+          const planetoid = await utils.getPlanetoid();
+          const rootEpoch = planetoid.bulkMetadataEpoch[0];
+          let bulk: Bulk | null = null;
+          let index = -1;
+          let currentEpoch = rootEpoch;
+
+          for (let i = 4; i < path.length + 4; i += 4) {
+            const bulkPath = path.substring(0, i - 4);
+            const subPath  = path.substring(0, i);
+            const nextBulk = await utils.getBulk(bulkPath, currentEpoch);
+            bulk = nextBulk;
+            if (!bulk) throw new Error(`获取元数据失败: ${bulkPath}`);
+            index = utils.bulk.getIndexByPath(bulk, subPath);
+            if (index < 0) throw new Error(`无效 path: ${subPath}`);
+            currentEpoch = bulk.bulkMetadataEpoch[index];
+          }
+          if (!bulk || index === -1) throw new Error('找不到节点索引');
+          return await utils.getNode(path, bulk, index);
         }
 
-        setStatus(`使用路径 (L${effectiveLevel}) ${chosen}，rings=${rings}，开始下载...`);
+        // 工具：加载并解析一个瓦片
+        async function loadOneTile(path: string, ring: number) {
+          console.log(`[Tile][fetch] ring=${ring} path=${path}`);
+          const nodePayload = await fetchNode(path);
 
-        // ======== 下载中心瓦片 ========
-        const planetoid = await utils.getPlanetoid();
-        const rootEpoch = planetoid.bulkMetadataEpoch[0];
-
-        // 走 bulk 链定位 index
-        let bulk: Bulk | null = null;
-        let index = -1;
-        let currentEpoch = rootEpoch;
-        for (let i = 4; i < chosen.length + 4; i += 4) {
-          const bulkPath = chosen.substring(0, i - 4);
-          const subPath = chosen.substring(0, i);
-          const nextBulk = await utils.getBulk(bulkPath, currentEpoch);
-          bulk = nextBulk;
-          if (!bulk) throw new Error(`在重新校验路径时，未能获取元数据: ${bulkPath}`);
-          index = utils.bulk.getIndexByPath(bulk, subPath);
-          if (index < 0) throw new Error('最佳路径无效，这不应该发生');
-          currentEpoch = bulk.bulkMetadataEpoch[index];
+          if (isCancelled) return;
+          let count = 0;
+          if (nodePayload?.meshes) {
+            for (const m of nodePayload.meshes) {
+              if (!m.vertices || !m.indices) continue;
+              const processed = processMesh(m, nodePayload.matrixGlobeFromMesh);
+              if (m.texture) {
+                try {
+                  const { buffer, extension } = await textureDecoder(m.texture);
+                  const blob = new Blob([buffer], { type: extension === 'jpg' ? 'image/jpeg' : 'image/png' });
+                  const url = URL.createObjectURL(blob);
+                  extractedAll.push({ ...processed, textureUrl: url });
+                } catch (e) {
+                  console.error('[纹理解码失败]', e);
+                  extractedAll.push({ ...processed, textureUrl: null });
+                }
+              } else {
+                extractedAll.push({ ...processed, textureUrl: null });
+              }
+              count++;
+            }
+          }
+          console.log(`[Tile][done] ring=${ring} path=${path} meshes=${count}`);
         }
 
-        if (!bulk || index === -1) throw new Error('无法为最佳路径获取元数据');
-        const nodePayload = await utils.getNode(chosen, bulk, index);
-        if (isCancelled) return;
+        // BFS 主循环（同父 8 邻）
+        let processed = 0;
+        while (queue.length && processed < HARD_CAP) {
+          // 控制并发
+          while (pool.length >= MAX_CONCURRENCY) {
+            await Promise.race(pool);
+            // 清理已完成
+            for (let i = pool.length - 1; i >= 0; i--) {
+              if ((pool[i] as any).settled) pool.splice(i, 1);
+            }
+          }
 
-        const extracted: ProcessedMesh[] = [];
-        if (nodePayload?.meshes) {
-          for (const m of nodePayload.meshes) {
-            if (!m.vertices || !m.indices) continue;
-            const processed = processMesh(m, nodePayload.matrixGlobeFromMesh);
-            if (m.texture) {
-              const { buffer, extension } = await textureDecoder(m.texture);
-              const blob = new Blob([buffer], { type: extension === 'jpg' ? 'image/jpeg' : 'image/png' });
-              const texUrl = URL.createObjectURL(blob);
-              extracted.push({ ...processed, textureUrl: texUrl });
-            } else {
-              extracted.push({ ...processed, textureUrl: null });
+          const { path, ring } = queue.shift()!;
+          processed++;
+
+          // 把这个 tile 的加载任务推进池子
+          const p = loadOneTile(path, ring)
+            .catch(err => console.error(`[Tile][error] ring=${ring} path=${path}`, err))
+            .finally(() => { (p as any).settled = true; });
+          pool.push(p);
+
+          // 扩展邻居
+          if (ring < rings) {
+            const neigh = getSameParent8Neighbors(path);
+            console.log(`[BFS][expand] ring=${ring} -> ${ring+1}，邻居数量=${neigh.length}`);
+            for (const np of neigh) {
+              if (!visited.has(np) && visited.size < HARD_CAP) {
+                visited.add(np);
+                queue.push({ path: np, ring: ring + 1 });
+              }
             }
           }
         }
 
-        // ===（下一步我们会把 rings BFS 真正接进去）===
-        console.log(`[邻居拼接] 目标 rings=${rings}（此版本先只加载中心，已打日志）`);
+        console.log(`[BFS] 队列出完或达到上限。已访问=${visited.size}，已派发=${processed}，等待任务收尾...`);
+        // 等待所有并发完成
+        await Promise.allSettled(pool);
 
-        // === 计算相机中心和半径 ===
-        if (extracted.length > 0) {
-          const first = extracted[0].vertices;
-          const min: vec3 = [Infinity, Infinity, Infinity];
-          const max: vec3 = [-Infinity, -Infinity, -Infinity];
-          for (let i = 0; i < first.length; i += 3) {
-            min[0] = Math.min(min[0], first[i]);
-            min[1] = Math.min(min[1], first[i + 1]);
-            min[2] = Math.min(min[2], first[i + 2]);
-            max[0] = Math.max(max[0], first[i]);
-            max[1] = Math.max(max[1], first[i + 1]);
-            max[2] = Math.max(max[2], first[i + 2]);
+        if (isCancelled) return;
+
+        // 计算相机包围盒（用所有已加载网格）
+        if (extractedAll.length > 0) {
+          let min: vec3 = [Infinity, Infinity, Infinity];
+          let max: vec3 = [-Infinity, -Infinity, -Infinity];
+          for (const m of extractedAll) {
+            const a = m.vertices;
+            for (let i = 0; i < a.length; i += 3) {
+              if (a[i] < min[0]) min[0] = a[i];
+              if (a[i+1] < min[1]) min[1] = a[i+1];
+              if (a[i+2] < min[2]) min[2] = a[i+2];
+              if (a[i] > max[0]) max[0] = a[i];
+              if (a[i+1] > max[1]) max[1] = a[i+1];
+              if (a[i+2] > max[2]) max[2] = a[i+2];
+            }
           }
-          const newCenter = vec3.fromValues((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+          const newCenter = vec3.fromValues((min[0]+max[0])/2, (min[1]+max[1])/2, (min[2]+max[2])/2);
           const size = vec3.distance(min, max);
           const newRadius = Math.max(size, 200);
-          console.log(`[相机] center=`, newCenter, ` size=`, size, ` -> radius=`, newRadius);
-          if (!isCancelled) {
-            setCenter(newCenter);
-            setRadius(newRadius);
-          }
+          console.log(`[相机] 由 ${extractedAll.length} 个网格计算 -> center=${newCenter} radius=${newRadius}`);
+          setCenter(newCenter);
+          setRadius(newRadius);
         }
 
-        if (!isCancelled) {
-          setMeshes(extracted);
-          setStatus('渲染完成！');
-        }
-      } catch (err: any) {
+        setMeshes(extractedAll);
+        setStatus(`渲染完成！tiles=${visited.size}, rings=${rings}, level=${effectiveLevel}`);
+      } catch (err:any) {
         if (!isCancelled) {
           console.error(err);
           setStatus(`错误: ${err.message}`);
