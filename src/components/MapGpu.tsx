@@ -115,6 +115,47 @@ const textureDecoder = (() => {
       };
     })();
 
+
+type TileCacheEntry = {
+  meshes: ProcessedMesh[];
+  status: string;
+  // 持有的 ObjectURL，便于逐出时 revoke
+  urls: string[];
+  // LRU 时间戳
+  ts: number;
+};
+
+const TILE_CACHE = new Map<string, TileCacheEntry>();
+const MAX_CACHE_TILES = 1600;
+
+function makeTileCacheKey(tileKey: string, rings: number) {
+  return `${tileKey}|r=${rings}`;
+}
+
+function touchLRU(key: string) {
+  const v = TILE_CACHE.get(key)!;
+  TILE_CACHE.delete(key);
+  v.ts = Date.now();
+  TILE_CACHE.set(key, v);
+}
+
+function evictIfNeeded() {
+  if (TILE_CACHE.size <= MAX_CACHE_TILES) return;
+  // Map 的迭代顺序 = 插入顺序，我们把最旧的拿掉
+  const oldestKey = TILE_CACHE.keys().next().value as string | undefined;
+  if (!oldestKey) return;
+  const old = TILE_CACHE.get(oldestKey)!;
+  // 释放旧的 ObjectURL
+  for (const u of old.urls) URL.revokeObjectURL(u);
+  TILE_CACHE.delete(oldestKey);
+}
+
+
+
+
+
+
+
 const initUtils = (config: { URL_PREFIX: string }) => {
     const { URL_PREFIX } = config;
     const [CMD_BULK, CMD_NODE] = [0, 3];
@@ -444,14 +485,14 @@ const Camera = ({children, initialCenter, initialRadius}: CameraProps) => (
 export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: number; lat: number; lon: number}> = ({ canvas, level, rings, lat, lon }) => {
   const { meshes, status, center, radius } = useGoogle3DTileWithLevelAndRings(lat,  lon, level, rings);
 
-  const textureUrls = useMemo(() => meshes.map(m => m.textureUrl), [meshes]);
+//   const textureUrls = useMemo(() => meshes.map(m => m.textureUrl), [meshes]);
 
-//   console.log("radius is ", radius, center);
-  useResource((dispose) => {
-    dispose(() => {
-      textureUrls.forEach(url => url && URL.revokeObjectURL(url));
-    });
-  }, [textureUrls]);
+// //   console.log("radius is ", radius, center);
+//   useResource((dispose) => {
+//     dispose(() => {
+//       textureUrls.forEach(url => url && URL.revokeObjectURL(url));
+//     });
+//   }, [textureUrls]);
 
   return (
     <WebGPU fallback={<p>WebGPU is not supported.</p>}>
@@ -785,6 +826,30 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
   useResource((dispose) => {
     let isCancelled = false;
 
+
+
+    const key = makeTileCacheKey(tileKey, rings);
+
+    // ✅ A. 先查缓存：命中就直接恢复上次结果并返回
+    const hit = TILE_CACHE.get(key);
+    if (hit) {
+      touchLRU(key);
+      setMeshes(hit.meshes);
+      // setCenter(hit.center);
+      // 只在第一次由缓存设半径；如果你不想改变现有 radius 逻辑可保留 hasFramed 判断
+      // if (!hasFramed) {
+      //   setRadius(hit.radius);
+      // }
+      setStatus(hit.status + '（cache）');
+
+      console.log("hit cache");
+      return () => { isCancelled = true; };
+    }
+
+
+
+
+
     const loadData = async () => {
       try {
         setStatus(`准备查找路径与加载：level=${wantedLevel}, rings=${rings}`);
@@ -949,7 +1014,33 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
         }
 
         setMeshes(extractedAll);
-        setStatus(`渲染完成！tiles=${visited.size}, rings=${rings}, level=${effectiveLevel}`);
+
+        const finalStatus = `渲染完成！tiles=${visited.size}, rings=${rings}, level=${effectiveLevel}`;
+
+        setStatus(finalStatus);
+
+
+
+
+        const urls = extractedAll
+          .map(m => m.textureUrl)
+          .filter((u): u is string => !!u);
+
+
+
+          TILE_CACHE.set(key, {
+            meshes: extractedAll,
+            status: finalStatus,
+            urls,
+            ts: Date.now(),
+          });
+          evictIfNeeded();
+
+
+
+
+
+
       } catch (err:any) {
         if (!isCancelled) {
           console.error(err);
