@@ -705,7 +705,138 @@ function getSameParent8Neighbors(path: string): string[] {
   return Array.from(new Set(out)).filter(p => p !== path);
 }
 
+
+
+
+
+
+
+/** 角度转弧度 */
+const deg2rad = (d: number) => d * Math.PI / 180;
+
+/** 把 (lat, lon, z) 转成 Slippy Map 的 (x, y, z) 瓦片坐标 */
+export function lonLatToTileXY(lat: number, lon: number, z: number) {
+  const n = 1 << z; // 2^z
+  const x = Math.floor(((lon + 180) / 360) * n);
+  const latRad = deg2rad(lat);
+  const y = Math.floor(
+    (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n
+  );
+  const xmax = n - 1, ymax = n - 1;
+  // 裁剪，避免越界
+  return { x: Math.min(Math.max(0, x), xmax), y: Math.min(Math.max(0, y), ymax), z };
+}
+
+/** 计算一个 tile 的经纬度包围盒（用于调试验证范围） */
+export function tileBounds(x: number, y: number, z: number) {
+  const n = 1 << z;
+  const lonL = x / n * 360 - 180;
+  const lonR = (x + 1) / n * 360 - 180;
+
+  const latRadT = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n)));
+  const latRadB = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n)));
+  const latT = latRadT * 180 / Math.PI;
+  const latB = latRadB * 180 / Math.PI;
+
+  return { north: latT, south: latB, west: lonL, east: lonR };
+}
+
+/** 生成以 Chebyshev 距离 rings 为半径的邻居列表（包含中心） */
+export function neighborsChebyshev(x: number, y: number, z: number, rings: number) {
+  const n = 1 << z;
+  const res: Array<{x:number;y:number;z:number;ring:number}> = [];
+  const seen = new Set<string>();
+
+  const push = (tx:number, ty:number, ring:number) => {
+    if (tx < 0 || ty < 0 || tx >= n || ty >= n) return; // 越界丢弃
+    const k = `${tx}:${ty}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    res.push({ x: tx, y: ty, z, ring });
+  };
+
+  // BFS 按圈推进：ring=0 是中心；1 → 3x3；2 → 5x5；…
+  for (let r = 0; r <= rings; r++) {
+    const minx = x - r, maxx = x + r;
+    const miny = y - r, maxy = y + r;
+
+    // 四条边扫一圈（避免重复点）
+    for (let tx = minx; tx <= maxx; tx++) {
+      push(tx, miny, r);
+      if (r > 0) push(tx, maxy, r);
+    }
+    for (let ty = miny + 1; ty <= maxy - 1; ty++) {
+      push(minx, ty, r);
+      if (r > 0) push(maxx, ty, r);
+    }
+  }
+
+  // 按 ring 由小到大排序（加载时可以渐进显示）
+  res.sort((a, b) => a.ring - b.ring);
+  return res;
+}
+
+/** 可选：把 (x,y,z) 编码成 QuadKey（0..3）——方便日志或和服务对接 */
+export function tileToQuadKey(x: number, y: number, z: number) {
+  let quadKey = '';
+  for (let i = z; i > 0; i--) {
+    let digit = 0;
+    const mask = 1 << (i - 1);
+    if ((x & mask) !== 0) digit += 1;
+    if ((y & mask) !== 0) digit += 2;
+    quadKey += digit.toString();
+  }
+  return quadKey;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel: number, rings: number) => {
+
+
+
+
+
+            // 假设你有 lat/lon/wantedLevel/rings
+        const z = Math.max(0, Math.min(23, Math.floor(wantedLevel))); // 保护一下层级
+        const { x, y } = lonLatToTileXY(lat, lon, z);
+
+        // 打日志：中心 tile
+        console.log(`[TILES] center -> z=${z} x=${x} y=${y} quadKey=${tileToQuadKey(x,y,z)}`);
+        console.log(`[TILES] center bounds`, tileBounds(x, y, z));
+
+        // 生成 rings 范围内所有邻居（包含中心）
+        const tiles = neighborsChebyshev(x, y, z, rings);
+        console.log(`[TILES] rings=${rings} → tiles=${tiles.length}`);
+        for (const t of tiles) {
+        if (t.ring === 0 || t.ring === rings) { // 只挑几条关键日志
+            const qb = tileBounds(t.x, t.y, t.z);
+            console.log(
+            `[TILES] ring=${t.ring} -> z=${t.z} x=${t.x} y=${t.y} quadKey=${tileToQuadKey(t.x,t.y,t.z)}`,
+            qb
+            );
+        }
+        }
+
+
+
+
+
+
   const [center, setCenter] = useState<vec3>([0, 0, 0]);
   const [radius, setRadius] = useState(500);
   const [meshes, setMeshes] = useState<ProcessedMesh[]>([]);
