@@ -429,7 +429,7 @@ const Camera = ({children, initialCenter, initialRadius}: CameraProps) => (
 
 
 export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: number; lat: number; lon: number}> = ({ canvas, level, rings, lat, lon }) => {
-  const { meshes, status, center, radius } = useGoogle3DTileWithLevelAndRings(30.3748035,  -81.5933274, level, rings);
+  const { meshes, status, center, radius } = useGoogle3DTileWithLevelAndRings(lat,  lon, level, rings);
 
   const textureUrls = useMemo(() => meshes.map(m => m.textureUrl), [meshes]);
 
