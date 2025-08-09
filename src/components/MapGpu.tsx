@@ -328,7 +328,7 @@ const processMesh = (mesh: MeshPayload, transformMatrix: Float64Array): Omit<Pro
     // 退化三角
     if (i1 === i2 || i1 === i3 || i2 === i3) {
         if (culledDegenerateCount < 5) {
-        console.warn(`[剔除日志] 退化三角 i=${i} -> (${i1}, ${i2}, ${i3})`);
+        // console.warn(`[剔除日志] 退化三角 i=${i} -> (${i1}, ${i2}, ${i3})`);
         }
         culledDegenerateCount++;
         continue;
@@ -340,7 +340,7 @@ const processMesh = (mesh: MeshPayload, transformMatrix: Float64Array): Omit<Pro
     const o3 = rawVertices[i3 * 8 + 3];
     if (o1 !== o2 || o2 !== o3) {
         if (culledOctantCount < 5) {
-        console.warn(`[剔除日志] 跨 Octant 三角 i=${i} -> (${i1}, ${i2}, ${i3}) oct=(${o1},${o2},${o3})`);
+        // console.warn(`[剔除日志] 跨 Octant 三角 i=${i} -> (${i1}, ${i2}, ${i3}) oct=(${o1},${o2},${o3})`);
         }
         culledOctantCount++;
         continue;
@@ -357,7 +357,7 @@ const processMesh = (mesh: MeshPayload, transformMatrix: Float64Array): Omit<Pro
     const finalIndices = new Uint16Array(listIndices);
 
     // （可选）简单统计
-    console.log(`[索引统计] 输入 stripLen=${stripIndices.length}, 有效 stripLen=${effectiveStripLen}, 输出 tris=${finalIndices.length / 3}, 退化剔除=${culledDegenerateCount}, 跨oct剔除=${culledOctantCount}`);
+    // console.log(`[索引统计] 输入 stripLen=${stripIndices.length}, 有效 stripLen=${effectiveStripLen}, 输出 tris=${finalIndices.length / 3}, 退化剔除=${culledDegenerateCount}, 跨oct剔除=${culledOctantCount}`);
 
 
 
@@ -389,171 +389,6 @@ function getSameParentNeighbors(path: string): string[] {
   
 
 
-// ===================================================================
-// == 步骤 1: 修改 useGoogle3DTile Hook
-// ===================================================================
-
-const useGoogle3DTile = (lat: number, lon: number, desiredLevel: number) => {
-  const [center, setCenter] = useState<vec3>([0, 0, 0]);
-  const [radius, setRadius] = useState(500);
-  const [meshes, setMeshes] = useState<ProcessedMesh[]>([]);
-  const [status, setStatus] = useState('正在初始化...');
-
-  useResource(() => {
-    console.log('[状态]', status);
-    return () => {};
-  }, [status]);
-
-  useResource((dispose) => {
-    let isCancelled = false;
-
-    const loadData = async () => {
-      try {
-        // 1) 夹紧层级
-        const MAX_LEVEL = 18;
-        const MIN_LEVEL = 2;
-        let req = Math.round(desiredLevel);
-        if (req > MAX_LEVEL) {
-          console.warn(`[层级夹紧] 请求 L${desiredLevel} 超过最大 L${MAX_LEVEL}，将使用 L${MAX_LEVEL}`);
-          req = MAX_LEVEL;
-        }
-        if (req < MIN_LEVEL) {
-          console.warn(`[层级夹紧] 请求 L${desiredLevel} 低于最小 L${MIN_LEVEL}，将使用 L${MIN_LEVEL}`);
-          req = MIN_LEVEL;
-        }
-        setStatus(`正在查找所有可用路径（目标 L${req}）...`);
-
-        const utils = initUtils({ URL_PREFIX: `https://kh.google.com/rt/earth/` });
-        const pathFinder = initPathFinder(utils);
-
-        // 2) 只搜索到 req 层，减少无谓请求
-        console.time('[PathFinder] 用时');
-        const allPaths = await pathFinder(lat, lon, req);
-        console.timeEnd('[PathFinder] 用时');
-        console.log('[路径集合] allPaths =', allPaths);
-
-        if (isCancelled) return;
-        if (allPaths.length === 0) {
-          setStatus('错误: 未找到任何可用路径。');
-          return;
-        }
-
-        // 3) 选择路径：先找等于 req；没有则找 <= req 的最长；再没有就用集合中最长
-        let bestPath = allPaths.find(p => p.length === req);
-        if (!bestPath) {
-          console.warn(`[选路] 没有精确到 L${req} 的路径，尝试选择 <= L${req} 的最长...`);
-          const candidates = allPaths.filter(p => p.length <= req);
-          if (candidates.length > 0) {
-            bestPath = candidates.reduce((a, b) => (a.length > b.length ? a : b));
-            console.warn(`[选路] 采用就近 L${bestPath.length} 的路径: ${bestPath}`);
-          } else {
-            bestPath = allPaths.reduce((a, b) => (a.length > b.length ? a : b));
-            console.warn(`[选路] 仅找到比 L${req} 更高层或异常集合，退回集合最长 L${bestPath.length}: ${bestPath}`);
-          }
-        } else {
-          console.log(`[选路] 命中精确层级 L${req}: ${bestPath}`);
-        }
-
-        setStatus(`使用路径 ${bestPath} (L${bestPath.length})，正在下载...`);
-
-        // 4) 校验并逐级进入 bulk，拿到 node
-        const planetoid = await utils.getPlanetoid();
-        const rootEpoch = planetoid.bulkMetadataEpoch[0];
-        let bulk: Bulk | null = null;
-        let index = -1;
-        let currentEpoch = rootEpoch;
-
-        for (let i = 4; i < bestPath.length + 4; i += 4) {
-          const bulkPath = bestPath.substring(0, i - 4);
-          const subPath  = bestPath.substring(0, i);
-          const nextBulk = await utils.getBulk(bulkPath, currentEpoch);
-          bulk = nextBulk;
-          if (!bulk) throw new Error(`在重新校验路径时，未能获取元数据: ${bulkPath}`);
-          index = utils.bulk.getIndexByPath(bulk, subPath);
-          if (index < 0) throw new Error(`路径无效: ${subPath}`);
-          currentEpoch = bulk.bulkMetadataEpoch[index];
-        }
-
-        if (!bulk || index === -1) throw new Error("无法为所选路径获取元数据");
-
-        const nodePayload = await utils.getNode(bestPath, bulk, index);
-        if (isCancelled) return;
-
-        setStatus(`下载完成 (L${bestPath.length})，正在处理几何与纹理...`);
-        const extractedMeshes: ProcessedMesh[] = [];
-
-        if (nodePayload?.meshes) {
-          for (const mesh of nodePayload.meshes) {
-            if (!mesh.vertices || !mesh.indices) continue;
-            const processed = processMesh(mesh, nodePayload.matrixGlobeFromMesh);
-
-            if (mesh.texture) {
-              try {
-                const { buffer, extension } = await textureDecoder(mesh.texture);
-                const blob = new Blob([buffer], { type: extension === 'jpg' ? 'image/jpeg' : 'image/png' });
-                const textureUrl = URL.createObjectURL(blob);
-                extractedMeshes.push({ ...processed, textureUrl });
-              } catch (e) {
-                console.error('[纹理解码失败]', e);
-                extractedMeshes.push({ ...processed, textureUrl: null });
-              }
-            } else {
-              extractedMeshes.push({ ...processed, textureUrl: null });
-            }
-          }
-        }
-
-        // （可选）加载同父邻居，可按需打开
-        // ...
-
-        // 5) 更新相机 & 网格
-        if (extractedMeshes.length > 0) {
-          console.log('--- 模型加载日志 (已清洗索引) ---');
-          extractedMeshes.forEach((m, i) => {
-            console.log(`Mesh ${i}: 顶点=${m.vertices.length / 3}, 三角形=${m.indices.length / 3}, 贴图=${!!m.textureUrl}`);
-          });
-
-          const vs = extractedMeshes[0].vertices;
-          const min: vec3 = [Infinity, Infinity, Infinity];
-          const max: vec3 = [-Infinity, -Infinity, -Infinity];
-          for (let i = 0; i < vs.length; i += 3) {
-            if (vs[i] < min[0]) min[0] = vs[i];
-            if (vs[i+1] < min[1]) min[1] = vs[i+1];
-            if (vs[i+2] < min[2]) min[2] = vs[i+2];
-            if (vs[i] > max[0]) max[0] = vs[i];
-            if (vs[i+1] > max[1]) max[1] = vs[i+1];
-            if (vs[i+2] > max[2]) max[2] = vs[i+2];
-          }
-          const newCenter = vec3.fromValues((min[0]+max[0])/2, (min[1]+max[1])/2, (min[2]+max[2])/2);
-          const size = vec3.distance(min, max);
-          const newRadius = Math.max(size, 200);
-
-          console.log(`[相机] center=${newCenter} radius=${newRadius} (层级 L${bestPath.length})`);
-          if (!isCancelled) {
-            setCenter(newCenter);
-            setRadius(newRadius);
-          }
-        }
-
-        if (!isCancelled) {
-          setMeshes(extractedMeshes);
-          setStatus(`渲染完成！（L${bestPath.length}）`);
-        }
-      } catch (error: any) {
-        if (!isCancelled) {
-          console.error(error);
-          setStatus(`错误: ${error.message}`);
-        }
-      }
-    };
-
-    loadData();
-    return () => { isCancelled = true; };
-    // ★ 依赖加上 desiredLevel，这样拖动 Slider 会重新加载
-  }, [lat, lon, desiredLevel]);
-
-  return { meshes, status, center, radius };
-};
 
 
 
@@ -598,6 +433,7 @@ export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: numbe
 
   const textureUrls = useMemo(() => meshes.map(m => m.textureUrl), [meshes]);
 
+//   console.log("radius is ", radius, center);
   useResource((dispose) => {
     dispose(() => {
       textureUrls.forEach(url => url && URL.revokeObjectURL(url));
@@ -893,19 +729,19 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
         const { x, y } = lonLatToTileXY(lat, lon, z);
 
         // 打日志：中心 tile
-        console.log(`[TILES] center -> z=${z} x=${x} y=${y} quadKey=${tileToQuadKey(x,y,z)}`);
-        console.log(`[TILES] center bounds`, tileBounds(x, y, z));
+        //console.log(`[TILES] center -> z=${z} x=${x} y=${y} quadKey=${tileToQuadKey(x,y,z)}`);
+        //console.log(`[TILES] center bounds`, tileBounds(x, y, z));
 
         // 生成 rings 范围内所有邻居（包含中心）
         const tiles = neighborsChebyshev(x, y, z, rings);
-        console.log(`[TILES] rings=${rings} → tiles=${tiles.length}`);
+        //console.log(`[TILES] rings=${rings} → tiles=${tiles.length}`);
         for (const t of tiles) {
         if (t.ring === 0 || t.ring === rings) { // 只挑几条关键日志
             const qb = tileBounds(t.x, t.y, t.z);
-            console.log(
-            `[TILES] ring=${t.ring} -> z=${t.z} x=${t.x} y=${t.y} quadKey=${tileToQuadKey(t.x,t.y,t.z)}`,
-            qb
-            );
+            // console.log(
+            // `[TILES] ring=${t.ring} -> z=${t.z} x=${t.x} y=${t.y} quadKey=${tileToQuadKey(t.x,t.y,t.z)}`,
+            // qb
+            // );
         }
         }
 
@@ -916,13 +752,16 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
 
   const [center, setCenter] = useState<vec3>([0, 0, 0]);
   const [radius, setRadius] = useState(500);
+  const [hasFramed, setHasFramed] = useState(false);
+
+
   const [meshes, setMeshes] = useState<ProcessedMesh[]>([]);
   const [status, setStatus] = useState('正在初始化...');
 
-  useResource(() => {
-    console.log('[状态]', status);
-    return () => {};
-  }, [status]);
+//   useResource(() => {
+//     console.log('[状态]', status);
+//     return () => {};
+//   }, [status]);
 
   useResource((dispose) => {
     let isCancelled = false;
@@ -934,7 +773,7 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
         const pathFinder = initPathFinder(utils);
 
         // 先取到 wantedLevel（或能找到的最接近）那一级的中心 path
-        const allPaths = await pathFinder(lat, lon, Math.max(22, wantedLevel));
+        const allPaths = await pathFinder(lat, lon, wantedLevel);
         if (isCancelled) return;
 
         if (!allPaths.length) {
@@ -950,7 +789,7 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
 
         if (!centerPath) throw new Error('未能选出中心 path');
 
-        console.log(`[层级选择] 想要 L${wantedLevel}，可用最大 L${maxFound}，实际使用 L${effectiveLevel}，center=${centerPath}`);
+        // console.log(`[层级选择] 想要 L${wantedLevel}，可用最大 L${maxFound}，实际使用 L${effectiveLevel}，center=${centerPath}`);
         setStatus(`中心瓦片 L${effectiveLevel}：${centerPath}；开始 BFS 加载，rings=${rings}`);
 
         // ======== BFS 队列 & 去重 ========
@@ -993,7 +832,7 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
 
         // 工具：加载并解析一个瓦片
         async function loadOneTile(path: string, ring: number) {
-          console.log(`[Tile][fetch] ring=${ring} path=${path}`);
+        //   console.log(`[Tile][fetch] ring=${ring} path=${path}`);
           const nodePayload = await fetchNode(path);
 
           if (isCancelled) return;
@@ -1018,7 +857,7 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
               count++;
             }
           }
-          console.log(`[Tile][done] ring=${ring} path=${path} meshes=${count}`);
+        //   console.log(`[Tile][done] ring=${ring} path=${path} meshes=${count}`);
         }
 
         // BFS 主循环（同父 8 邻）
@@ -1081,7 +920,13 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
           const newRadius = Math.max(size, 200);
           console.log(`[相机] 由 ${extractedAll.length} 个网格计算 -> center=${newCenter} radius=${newRadius}`);
           setCenter(newCenter);
-          setRadius(newRadius);
+          if (!hasFramed) {
+                setRadius(newRadius);     // 只在第一次按包围盒设半径
+                setHasFramed(true);
+            } else {
+            // 之后别动 radius（或者做很小幅度变化）
+            // setRadius(prev => prev); // 等价什么都不做
+            }
         }
 
         setMeshes(extractedAll);
