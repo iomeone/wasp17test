@@ -429,7 +429,7 @@ const Camera = ({children, initialCenter, initialRadius}: CameraProps) => (
 
 
 export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: number }> = ({ canvas, level, rings }) => {
-  const { meshes, status, center, radius } = useGoogle3DTileWithLevelAndRings(37.795, -122.402, level, rings);
+  const { meshes, status, center, radius } = useGoogle3DTileWithLevelAndRings(30.3748035,  -81.5933274, level, rings);
 
   const textureUrls = useMemo(() => meshes.map(m => m.textureUrl), [meshes]);
 
@@ -447,7 +447,7 @@ export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: numbe
           <Scene>
             <Pass lights>
               <AmbientLight intensity={1.5} />
-              <PointLight position={[center[0], center[1] + radius, center[2]]} intensity={50000000} />
+              {/* <PointLight position={[center[0], center[1] + radius, center[2]]} intensity={0} /> */}
               {meshes.length > 0
                 ? meshes.map((mesh, i) => (
                   <GeometryData
