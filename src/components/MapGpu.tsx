@@ -72,8 +72,48 @@ interface ProcessedMesh {
 const textureDecoder = (() => {
     function decodeDXT(buffer: DataView, width: number, height: number): Uint8Array { const rgba = new Uint8Array(width * height * 4); const blockCountX = Math.floor((width + 3) / 4); const blockCountY = Math.floor((height + 3) / 4); for (let j = 0; j < blockCountY; j++) { for (let i = 0; i < blockCountX; i++) { const blockOffset = (j * blockCountX + i) * 8; const color0 = buffer.getUint16(blockOffset, true); const color1 = buffer.getUint16(blockOffset + 2, true); const code = buffer.getUint32(blockOffset + 4, true); const r0 = (color0 >> 11) & 0x1F, g0 = (color0 >> 5) & 0x3F, b0 = color0 & 0x1F; const r1 = (color1 >> 11) & 0x1F, g1 = (color1 >> 5) & 0x3F, b1 = color1 & 0x1F; const colorTable: (number[] | undefined)[] = [[r0 << 3, g0 << 2, b0 << 3, 255], [r1 << 3, g1 << 2, b1 << 3, 255], [], []]; if (color0 > color1) { colorTable[2] = [(2 * r0 + r1) / 3 << 3, (2 * g0 + g1) / 3 << 2, (2 * b0 + b1) / 3 << 3, 255]; colorTable[3] = [(r0 + 2 * r1) / 3 << 3, (g0 + 2 * g1) / 3 << 2, (b0 + 2 * b1) / 3 << 3, 255]; } else { colorTable[2] = [(r0 + r1) / 2 << 3, (g0 + g1) / 2 << 2, (b0 + b1) / 2 << 3, 255]; colorTable[3] = [0, 0, 0, 0]; } for (let y = 0; y < 4; y++) { for (let x = 0; x < 4; x++) { const pixelIndex = (j * 4 + y) * width + (i * 4 + x); if (pixelIndex < width * height) { const color = colorTable[(code >> (2 * (4 * y + x))) & 0x03]; if (color) { rgba[pixelIndex * 4] = color[0]; rgba[pixelIndex * 4 + 1] = color[1]; rgba[pixelIndex * 4 + 2] = color[2]; rgba[pixelIndex * 4 + 3] = color[3]; } } } } } } return rgba; }
     const bmp = (() => { function encode(imgData: { data: number[] | Uint8Array, width: number, height: number }): { data: Uint8Array } { const width = imgData.width, height = imgData.height, data = imgData.data; const extraBytes = (4 - (width * 3) % 4) % 4; const fileSize = 54 + (width * 3 + extraBytes) * height; const buf = new ArrayBuffer(fileSize); const view = new DataView(buf); view.setUint16(0, 0x424D, false); view.setUint32(2, fileSize, true); view.setUint32(10, 54, true); view.setUint32(14, 40, true); view.setUint32(18, width, true); view.setUint32(22, height, true); view.setUint16(26, 1, true); view.setUint16(28, 24, true); view.setUint32(34, (width * 3 + extraBytes) * height, true); let p = 54; for (let y = height - 1; y >= 0; y--) { for (let x = 0; x < width; x++) { const i = (y * width + x) * 4; view.setUint8(p++, data[i + 2]); view.setUint8(p++, data[i + 1]); view.setUint8(p++, data[i]); } for (let i = 0; i < extraBytes; i++) { view.setUint8(p++, 0); } } return { data: new Uint8Array(buf) }; } return { encode }; })();
-    return function decodeTexture(tex: TexturePayload): { extension: string, buffer: Uint8Array } { switch (tex.textureFormat) { case 1: return { extension: 'jpg', buffer: tex.bytes }; case 6: const bytes = tex.bytes; const abuf = new Uint8Array(bytes).buffer; const imageDataView = new DataView(abuf, 0, bytes.length); const rgbaData = decodeDXT(imageDataView, tex.width, tex.height); const rawData = bmp.encode({ data: rgbaData, width: tex.width, height: tex.height }); return { extension: 'bmp', buffer: rawData.data }; default: throw new Error(`unknown textureFormat ${tex.textureFormat}`); } }
-})();
+    return async function decodeTexture(
+        tex: TexturePayload
+      ): Promise<{ extension: string; buffer: Uint8Array }> {
+        switch (tex.textureFormat) {
+          case 1:
+            // jpg 直接返回
+            return { extension: 'jpg', buffer: tex.bytes };
+    
+          case 6:
+            // 这里面你已经用了 await，所以必须 async
+            const bytes = tex.bytes;
+            const abuf = new Uint8Array(bytes).buffer;
+            const imageDataView = new DataView(abuf, 0, bytes.length);
+            const rgbaData = decodeDXT(imageDataView, tex.width, tex.height);
+    
+            const canvas =
+              typeof OffscreenCanvas !== 'undefined'
+                ? new OffscreenCanvas(tex.width, tex.height)
+                : Object.assign(document.createElement('canvas'), {
+                    width: tex.width,
+                    height: tex.height,
+                  });
+    
+            const ctx = (canvas as any).getContext('2d');
+            const imgData = new ImageData(new Uint8ClampedArray(rgbaData), tex.width, tex.height);
+            ctx.putImageData(imgData, 0, 0);
+    
+            const blob = await new Promise<Blob>((resolve) => {
+              if ('convertToBlob' in canvas) {
+                (canvas as OffscreenCanvas).convertToBlob({ type: 'image/png' }).then(resolve);
+              } else {
+                (canvas as HTMLCanvasElement).toBlob((b) => resolve(b!), 'image/png');
+              }
+            });
+    
+            return { extension: 'png', buffer: new Uint8Array(await blob.arrayBuffer()) };
+    
+          default:
+            throw new Error(`unknown textureFormat ${tex.textureFormat}`);
+        }
+      };
+    })();
 
 const initUtils = (config: { URL_PREFIX: string }) => {
     const { URL_PREFIX } = config;
@@ -335,16 +375,14 @@ const processMesh = (mesh: MeshPayload, transformMatrix: Float64Array): Omit<Pro
 
 
 function getSameParentNeighbors(path: string): string[] {
-    if (!path || path.length < 3) return []; // 保护：至少包含初始八分区 + 1 层
+    if (!path || path.length < 3) return [];
     const parent = path.slice(0, -1);
-    const last = path.charCodeAt(path.length - 1) - 48; // '0'->0
-    const high = last & 4;  // 保持最高位不变
-    const base = last & 3;  // 低两位 0..3: 0=SW,1=SE,2=NW,3=NE
-  
-    const horiz = parent + String.fromCharCode(48 + (high | (base ^ 1))); // 翻 bit0
-    const vert  = parent + String.fromCharCode(48 + (high | (base ^ 2))); // 翻 bit1
-    const diag  = parent + String.fromCharCode(48 + (high | (base ^ 3))); // 翻 bit0|bit1
-  
+    const last   = path.charCodeAt(path.length - 1) - 48; // '0'->0
+    const high   = last & 4;   // 保留最高位
+    const base   = last & 3;   // 低两位 0..3: 0=SW,1=SE,2=NW,3=NE
+    const horiz  = parent + String.fromCharCode(48 + (high | (base ^ 1)));
+    const vert   = parent + String.fromCharCode(48 + (high | (base ^ 2)));
+    const diag   = parent + String.fromCharCode(48 + (high | (base ^ 3)));
     return [horiz, vert, diag];
   }
 
@@ -443,18 +481,59 @@ const useGoogle3DTile = (lat: number, lon: number) => {
                         const processedGeometry = processMesh(mesh, nodePayload.matrixGlobeFromMesh);
 
                         let textureUrl: string | null = null;
+
+
                         if (mesh.texture) {
-                            const { buffer, extension } = textureDecoder(mesh.texture);
-                            const blob = new Blob([buffer], { type: extension === 'jpg' ? 'image/jpeg' : 'image/bmp' });
-                            textureUrl = URL.createObjectURL(blob);
-                        }
-                        
-                        extractedMeshes.push({
-                            ...processedGeometry,
-                            textureUrl,
-                        });
+                            const { buffer, extension } = await textureDecoder(mesh.texture); // ← 加 await
+                            const blob = new Blob([buffer], { type: extension === 'jpg' ? 'image/jpeg' : 'image/png' });
+                            const textureUrl = URL.createObjectURL(blob);
+                            extractedMeshes.push({ ...processedGeometry, textureUrl });
+                          }
                     }
                 }
+
+
+
+
+                try {
+                    const neighbors = getSameParentNeighbors(bestPath);
+                    console.log('[邻居(同父)]:', neighbors);
+                  
+                    for (const nPath of neighbors) {
+                      // 与 bestPath 同父 → 所属 bulk 不变，直接用当前 bulk 计算索引
+                      const nIndex = utils.bulk.getIndexByPath(bulk, nPath);
+                      if (nIndex < 0) {
+                        console.warn('[邻居] 未在 bulk 中找到索引:', nPath);
+                        continue;
+                      }
+                  
+                      // 拉取邻居节点
+                      const nPayload = await utils.getNode(nPath, bulk, nIndex);
+                      if (!nPayload || !nPayload.meshes) continue;
+                  
+                      // 处理邻居的 mesh（与 bestPath 相同流程）
+                      for (const m of nPayload.meshes) {
+                        if (!m.vertices || !m.indices) continue;
+                  
+                        const processed = processMesh(m, nPayload.matrixGlobeFromMesh);
+                  
+                        let texUrl: string | null = null;
+                        if (m.texture) {
+                            const { buffer, extension } = await textureDecoder(m.texture); // ← 加 await
+                            const blob = new Blob([buffer], { type: extension === 'jpg' ? 'image/jpeg' : 'image/png' });
+                            const texUrl = URL.createObjectURL(blob);
+                            extractedMeshes.push({ ...processed, textureUrl: texUrl });
+                          }
+       
+                      }
+                    }
+                  } catch (e) {
+                    console.warn('加载邻居节点时发生问题：', e);
+                  }
+
+
+
+
                 
                 if (extractedMeshes.length > 0) {
                     console.log("--- 模型加载日志 (已清洗索引) ---");
@@ -542,7 +621,7 @@ const Camera = ({children, initialCenter, initialRadius}: CameraProps) => (
         theta={theta} 
         target={target}
         near={0.1}
-        far={radius * 2}
+        far={radius * 20}
         >
         {children}
       </OrbitCamera>
