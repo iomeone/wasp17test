@@ -1,19 +1,19 @@
 import React, { useState, useLayoutEffect, useRef } from 'react';
 import { LiveCanvas } from '@use-gpu/react';
 import { MapGpu } from '../components/MapGpu';
+import { Card, CardHeader, CardBody, Button, Spacer, Slider } from "@heroui/react";
 
 export const Map: React.FC = () => {
-  // 1. 创建一个 ref 来引用我们的 div 容器
   const containerRef = useRef<HTMLDivElement>(null);
-  // 2. 使用 state 来存储和更新尺寸
   const [size, setSize] = useState({ width: 0, height: 0 });
 
-  // 3. 使用 Effect 在 React 环境中安全地监听尺寸变化
+  // 新增：当前 zoom 层级
+  const [level, setLevel] = useState<number>(18);
+
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // 4. 创建一个 ResizeObserver 来监测容器 div 的尺寸
     const resizeObserver = new ResizeObserver(entries => {
       const entry = entries[0];
       if (entry) {
@@ -23,18 +23,38 @@ export const Map: React.FC = () => {
     });
 
     resizeObserver.observe(container);
-
-    // 5. 组件卸载时，停止监听以防止内存泄漏
     return () => resizeObserver.disconnect();
-  }, []); // 空依赖数组确保这个 Effect 只运行一次
+  }, []);
 
   return (
-    // 6. 将 ref 附加到 div 上
-    <div  className="relative flex w-full h-full">
-      <LiveCanvas >
-        {/* 7. 现在，我们将从 state 中获取的 width 和 height 传递给 MyGpu */}
+    <div ref={containerRef} className="relative flex w-full h-full">
+      {/* GPU 渲染 */}
+      <LiveCanvas>
         {(canvas) => <MapGpu canvas={canvas}  />}
       </LiveCanvas>
+
+
+      <div className="absolute top-4 left-4 z-10 w-72">
+        <Card
+          shadow="none"                // 去掉阴影
+          className="bg-transparent p-2" // 背景透明 + 内边距
+        >
+          <CardBody className="bg-white/20 backdrop-blur-sm rounded-lg p-3">
+            <Slider
+              label="显示层级"
+              minValue={2}
+              maxValue={18}
+              step={1}
+              value={level}
+              onChange={(v) => setLevel(Array.isArray(v) ? v[0] : v)}
+              getValue={(v) => `L${Array.isArray(v) ? v[0] : v}`}
+            />
+          </CardBody>
+        </Card>
+      </div>
+
+
+    
     </div>
   );
 };
