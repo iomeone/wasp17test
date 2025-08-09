@@ -334,6 +334,22 @@ const processMesh = (mesh: MeshPayload, transformMatrix: Float64Array): Omit<Pro
 };
 
 
+function getSameParentNeighbors(path: string): string[] {
+    if (!path || path.length < 3) return []; // 保护：至少包含初始八分区 + 1 层
+    const parent = path.slice(0, -1);
+    const last = path.charCodeAt(path.length - 1) - 48; // '0'->0
+    const high = last & 4;  // 保持最高位不变
+    const base = last & 3;  // 低两位 0..3: 0=SW,1=SE,2=NW,3=NE
+  
+    const horiz = parent + String.fromCharCode(48 + (high | (base ^ 1))); // 翻 bit0
+    const vert  = parent + String.fromCharCode(48 + (high | (base ^ 2))); // 翻 bit1
+    const diag  = parent + String.fromCharCode(48 + (high | (base ^ 3))); // 翻 bit0|bit1
+  
+    return [horiz, vert, diag];
+  }
+
+  
+
 
 // ===================================================================
 // == 步骤 1: 修改 useGoogle3DTile Hook
@@ -383,6 +399,10 @@ const useGoogle3DTile = (lat: number, lon: number) => {
                     console.error("在 allPaths 数组中未找到长度为18的路径");
                     return;
                 }
+
+
+                const neighbors = getSameParentNeighbors(bestPath);
+                console.log('[邻居: 同父水平/垂直/对角]', neighbors);
                
 
                 setStatus(`使用最低层级路径 ${bestPath}，正在下载...`);
