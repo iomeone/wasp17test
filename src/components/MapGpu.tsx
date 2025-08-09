@@ -589,88 +589,197 @@ const Camera = ({children, initialCenter, initialRadius}: CameraProps) => (
     )}
   />
 );
-// 这是最终的、与官方示例对齐的正确版本
-// ===================================================================
-// == 步骤 3: 修改 MyGpu 主组件
-// ===================================================================
-export const MapGpu: LC<{canvas: HTMLCanvasElement; level?: number}> = ({ canvas, level  }) => {
-    // 从 Hook 中获取 center 和 radius
 
-    const desiredLevel = typeof level === 'number' ? level : 18;
 
-    const { meshes, status, center, radius } = useGoogle3DTile(37.795, -122.402, desiredLevel);
-    console.log(37.795, -122.402);
 
-    const textureUrls = useMemo(() => meshes.map(m => m.textureUrl), [meshes]);
-    
-    useResource((dispose) => {
-        dispose(() => {
-            textureUrls.forEach(url => {
-                if (url) URL.revokeObjectURL(url);
-            });
-        });
-    }, [textureUrls]);
 
-    return (
-        <WebGPU fallback={<p>WebGPU is not supported.</p>}>
-            <AutoCanvas canvas={canvas}>
-                {/* 将 center 和 radius 传递给 Camera 组件 */}
-                <Camera initialCenter={center} initialRadius={radius}>
-                    <Scene>
-                        <Pass lights>
-                            <AmbientLight intensity={1.5} />
-                            {/* 让点光源也围绕模型中心，确保能照到 */}
-                            <PointLight position={[center[0], center[1] + radius, center[2]]} intensity={50000000} />
-                
-                            {meshes.length > 0
-                                ? meshes.map((mesh, i) => (
-                                    <GeometryData
-                                        key={i}
-                                        attributes={{
-                                            positions: mesh.vertices,
-                                            uvs: mesh.uvs,
-                                            indices: mesh.indices,
-                                        }}
-                                        count={mesh.indices.length}
-                                        formats={{
-                                            positions: 'vec3<f32>',
-                                            uvs: 'vec2<f32>',
-                                            indices: 'u16',
-                                        }}
-                                    >
-                                        {(gpuGeometry) => (
-                                            mesh.textureUrl ?
-                                            <ImageTexture url={mesh.textureUrl}>
-                                                    {(texture) => {
-                                                        
-                                                        // ======================================================
-                                                        // ==           *** 第 2 处新增日志 *** ==
-                                                        // ==  检查 <ImageTexture> 是否成功加载并返回 texture 对象 ==
-                                                        // ======================================================
-                                                        console.log(`[调试日志] Mesh ${i} 的 ImageTexture 组件加载结果 (texture 对象):`, texture, '对应的URL:', mesh.textureUrl);
-                                                        
-                                                        return (
-                                                            texture ?
-                                                            <PBRMaterial albedoMap={texture} albedo={[1, 1, 1, 1]}>
-                                                                <Mesh mesh={gpuGeometry} shaded/>
-                                                            </PBRMaterial>
-                                                            : null
-                                                        )
-                                                    }}
-                                            </ImageTexture>
-                                            :
-                                            <PBRMaterial albedo={[0.7, 0.7, 0.7, 1]}>
-                                                <Mesh mesh={gpuGeometry} />
-                                            </PBRMaterial>
-                                        )}
-                                    </GeometryData>
-                                ))
-                                : null
-                            }
-                        </Pass>
-                    </Scene>
-                </Camera>
-            </AutoCanvas>
-        </WebGPU>
-    );
+export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: number }> = ({ canvas, level, rings }) => {
+  const { meshes, status, center, radius } = useGoogle3DTileWithLevelAndRings(37.795, -122.402, level, rings);
+
+  const textureUrls = useMemo(() => meshes.map(m => m.textureUrl), [meshes]);
+
+  useResource((dispose) => {
+    dispose(() => {
+      textureUrls.forEach(url => url && URL.revokeObjectURL(url));
+    });
+  }, [textureUrls]);
+
+  return (
+    <WebGPU fallback={<p>WebGPU is not supported.</p>}>
+      <AutoCanvas canvas={canvas}>
+        <Camera initialCenter={center} initialRadius={radius}>
+          <Scene>
+            <Pass lights>
+              <AmbientLight intensity={1.5} />
+              <PointLight position={[center[0], center[1] + radius, center[2]]} intensity={50000000} />
+              {meshes.length > 0
+                ? meshes.map((mesh, i) => (
+                  <GeometryData
+                    key={i}
+                    attributes={{
+                      positions: mesh.vertices,
+                      uvs: mesh.uvs,
+                      indices: mesh.indices,
+                    }}
+                    count={mesh.indices.length}
+                    formats={{
+                      positions: 'vec3<f32>',
+                      uvs: 'vec2<f32>',
+                      indices: 'u16',
+                    }}
+                  >
+                    {(gpuGeometry) => (
+                      mesh.textureUrl ? (
+                        <ImageTexture url={mesh.textureUrl}>
+                          {(texture) =>
+                            texture ? (
+                              <PBRMaterial albedoMap={texture} albedo={[1, 1, 1, 1]}>
+                                <Mesh mesh={gpuGeometry} shaded />
+                              </PBRMaterial>
+                            ) : null
+                          }
+                        </ImageTexture>
+                      ) : (
+                        <PBRMaterial albedo={[0.7, 0.7, 0.7, 1]}>
+                          <Mesh mesh={gpuGeometry} />
+                        </PBRMaterial>
+                      )
+                    )}
+                  </GeometryData>
+                ))
+                : null}
+            </Pass>
+          </Scene>
+        </Camera>
+      </AutoCanvas>
+    </WebGPU>
+  );
+};
+
+
+const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel: number, rings: number) => {
+  const [center, setCenter] = useState<vec3>([0, 0, 0]);
+  const [radius, setRadius] = useState(500);
+  const [meshes, setMeshes] = useState<ProcessedMesh[]>([]);
+  const [status, setStatus] = useState('正在初始化...');
+
+  useResource((dispose) => {
+    console.log('[状态]', status);
+    return () => {};
+  }, [status]);
+
+  useResource((dispose) => {
+    let isCancelled = false;
+
+    const loadData = async () => {
+      try {
+        setStatus('正在查找所有可用路径...');
+        const utils = initUtils({ URL_PREFIX: `https://kh.google.com/rt/earth/` });
+        const pathFinder = initPathFinder(utils);
+
+        // 这里把 maxLevel 设得比较高，拿全，然后我们自己根据 wantedLevel 做选择
+        const allPaths = await pathFinder(lat, lon, Math.max(22, wantedLevel));
+        if (isCancelled) return;
+
+        if (!allPaths.length) {
+          setStatus('错误: 未找到任何可用路径。');
+          return;
+        }
+
+        const maxFound = allPaths.reduce((m, p) => Math.max(m, p.length), 0);
+        const effectiveLevel = Math.min(wantedLevel, maxFound);
+        const chosen =
+          allPaths.find(p => p.length === effectiveLevel) ||
+          allPaths.reduce((best, p) => (p.length <= effectiveLevel && p.length > (best?.length ?? -1) ? p : best), '' as string);
+
+        console.log(`[层级选择] 想要 L${wantedLevel}，可用最大 L${maxFound}，实际使用 L${effectiveLevel}，path=${chosen}`);
+
+        if (!chosen) {
+          console.warn('[层级选择] 找不到合适路径，退回使用 allPaths 中最长者。');
+        }
+
+        setStatus(`使用路径 (L${effectiveLevel}) ${chosen}，rings=${rings}，开始下载...`);
+
+        // ======== 下载中心瓦片 ========
+        const planetoid = await utils.getPlanetoid();
+        const rootEpoch = planetoid.bulkMetadataEpoch[0];
+
+        // 走 bulk 链定位 index
+        let bulk: Bulk | null = null;
+        let index = -1;
+        let currentEpoch = rootEpoch;
+        for (let i = 4; i < chosen.length + 4; i += 4) {
+          const bulkPath = chosen.substring(0, i - 4);
+          const subPath = chosen.substring(0, i);
+          const nextBulk = await utils.getBulk(bulkPath, currentEpoch);
+          bulk = nextBulk;
+          if (!bulk) throw new Error(`在重新校验路径时，未能获取元数据: ${bulkPath}`);
+          index = utils.bulk.getIndexByPath(bulk, subPath);
+          if (index < 0) throw new Error('最佳路径无效，这不应该发生');
+          currentEpoch = bulk.bulkMetadataEpoch[index];
+        }
+
+        if (!bulk || index === -1) throw new Error('无法为最佳路径获取元数据');
+        const nodePayload = await utils.getNode(chosen, bulk, index);
+        if (isCancelled) return;
+
+        const extracted: ProcessedMesh[] = [];
+        if (nodePayload?.meshes) {
+          for (const m of nodePayload.meshes) {
+            if (!m.vertices || !m.indices) continue;
+            const processed = processMesh(m, nodePayload.matrixGlobeFromMesh);
+            if (m.texture) {
+              const { buffer, extension } = await textureDecoder(m.texture);
+              const blob = new Blob([buffer], { type: extension === 'jpg' ? 'image/jpeg' : 'image/png' });
+              const texUrl = URL.createObjectURL(blob);
+              extracted.push({ ...processed, textureUrl: texUrl });
+            } else {
+              extracted.push({ ...processed, textureUrl: null });
+            }
+          }
+        }
+
+        // ===（下一步我们会把 rings BFS 真正接进去）===
+        console.log(`[邻居拼接] 目标 rings=${rings}（此版本先只加载中心，已打日志）`);
+
+        // === 计算相机中心和半径 ===
+        if (extracted.length > 0) {
+          const first = extracted[0].vertices;
+          const min: vec3 = [Infinity, Infinity, Infinity];
+          const max: vec3 = [-Infinity, -Infinity, -Infinity];
+          for (let i = 0; i < first.length; i += 3) {
+            min[0] = Math.min(min[0], first[i]);
+            min[1] = Math.min(min[1], first[i + 1]);
+            min[2] = Math.min(min[2], first[i + 2]);
+            max[0] = Math.max(max[0], first[i]);
+            max[1] = Math.max(max[1], first[i + 1]);
+            max[2] = Math.max(max[2], first[i + 2]);
+          }
+          const newCenter = vec3.fromValues((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+          const size = vec3.distance(min, max);
+          const newRadius = Math.max(size, 200);
+          console.log(`[相机] center=`, newCenter, ` size=`, size, ` -> radius=`, newRadius);
+          if (!isCancelled) {
+            setCenter(newCenter);
+            setRadius(newRadius);
+          }
+        }
+
+        if (!isCancelled) {
+          setMeshes(extracted);
+          setStatus('渲染完成！');
+        }
+      } catch (err: any) {
+        if (!isCancelled) {
+          console.error(err);
+          setStatus(`错误: ${err.message}`);
+        }
+      }
+    };
+
+    loadData();
+    return () => { isCancelled = true; };
+  }, [lat, lon, wantedLevel, rings]);
+
+  return { meshes, status, center, radius };
 };
