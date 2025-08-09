@@ -1,4 +1,16 @@
- npm install -D shadcn
+ 
+
+
+
+1, w a s d 
+2, cache
+3，input for lat logi
+
+
+
+
+
+npm install -D shadcn
 
 npm install -D tailwindcss@3.2.7
 
