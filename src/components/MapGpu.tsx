@@ -124,7 +124,20 @@ const initUtils = (config: { URL_PREFIX: string }) => {
     const bulkUtils = { getIndexByPath: (b: Bulk, p: string): number => { let c = -1; for (let e = p, f = (e.length - 1) - ((e.length - 1) % 4); f < e.length; ++f) c = b.childIndices[8 * (c + 1) + (e.charCodeAt(f) - 48)]; return c; }, };
     return {
         bulk: bulkUtils, 
-        getNode: async (p: string, b: Bulk, i: number): Promise<NodePayload> => { const nE = b.epoch[i]; const nIE = b.imageryEpochArray ? b.imageryEpochArray[i] : b.defaultImageryEpoch; const nTF = b.textureFormatArray ? b.textureFormatArray[i] : b.defaultTextureFormat; const nF = b.flags[i]; const iEP = nF & 16 ? `!3u${nIE}` : ''; const url = `!1m2!1s${p}!2u${nE}!2e${nTF}${iEP}!4b0`; return await decode(CMD_NODE, `NodeData/pb=${url}`, false); },
+        getNode: async (p: string, b: Bulk, i: number): Promise<NodePayload> => {
+          const nE  = b.epoch[i];
+          const nIE = b.imageryEpochArray ? b.imageryEpochArray[i] : b.defaultImageryEpoch;
+          const nTF = b.textureFormatArray ? b.textureFormatArray[i] : b.defaultTextureFormat;
+          const nF  = b.flags[i];
+          const iEP = nF & 16 ? `!3u${nIE}` : '';
+          const url = `!1m2!1s${p}!2u${nE}!2e${nTF}${iEP}!4b0`;
+          // ✅ 开启缓存（同一 URL 不再重复请求）
+          return await decode(CMD_NODE, `NodeData/pb=${url}`, true);
+          // 或者直接：return await decode(CMD_NODE, `NodeData/pb=${url}`);
+        },
+
+
+
         getPlanetoid: async (): Promise<Planetoid> => await decode(CMD_BULK, `PlanetoidMetadata`),
     
     
@@ -742,7 +755,7 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
         }
 
 
-
+  const tileKey = useMemo(() => `${z}/${x}/${y}`, [z, x, y]);
 
 
 
@@ -759,14 +772,24 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
 //     return () => {};
 //   }, [status]);
 
+  const utils = useMemo(
+    () => initUtils({ URL_PREFIX: `https://kh.google.com/rt/earth/` }),
+    []
+  );
+
+  const pathFinder = useMemo(
+    () => initPathFinder(utils),
+    [utils]  // utils 只会在第一次渲染创建，所以 pathFinder 也只会创建一次
+  );
+
   useResource((dispose) => {
     let isCancelled = false;
 
     const loadData = async () => {
       try {
         setStatus(`准备查找路径与加载：level=${wantedLevel}, rings=${rings}`);
-        const utils = initUtils({ URL_PREFIX: `https://kh.google.com/rt/earth/` });
-        const pathFinder = initPathFinder(utils);
+
+       
 
         // 先取到 wantedLevel（或能找到的最接近）那一级的中心 path
         const allPaths = await pathFinder(lat, lon, wantedLevel);
@@ -937,7 +960,7 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
 
     loadData();
     return () => { isCancelled = true; };
-  }, [lat, lon, wantedLevel, rings]);
+  }, [tileKey, rings]);
 
   return { meshes, status, center, radius };
 };
