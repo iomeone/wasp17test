@@ -82,7 +82,13 @@ const initUtils = (config: { URL_PREFIX: string }) => {
     const cache: Record<string, any> = {}; const requests: Record<string, { resolve: (value: any) => void, reject: (reason?: any) => void }[]> = {};
     async function decode(command: number, url: string, useMemoryCache = true): Promise<any> { if (useMemoryCache && cache[url]) return cache[url]; if (requests[url]) return await new Promise((resolve, reject) => requests[url].push({ resolve, reject })); requests[url] = []; let res; try { const payload = await getUrl(`${URL_PREFIX}${url}`); const data = await decodeResource(command, payload); res = data.payload; if (useMemoryCache) cache[url] = res; } catch (ex) { requests[url].forEach(p => p.reject(ex as any)); delete requests[url]; throw ex; } requests[url].forEach(p => p.resolve(res)); delete requests[url]; return res; }
     const bulkUtils = { getIndexByPath: (b: Bulk, p: string): number => { let c = -1; for (let e = p, f = (e.length - 1) - ((e.length - 1) % 4); f < e.length; ++f) c = b.childIndices[8 * (c + 1) + (e.charCodeAt(f) - 48)]; return c; }, };
-    return { bulk: bulkUtils, getNode: async (p: string, b: Bulk, i: number): Promise<NodePayload> => { const nE = b.epoch[i]; const nIE = b.imageryEpochArray ? b.imageryEpochArray[i] : b.defaultImageryEpoch; const nTF = b.textureFormatArray ? b.textureFormatArray[i] : b.defaultTextureFormat; const nF = b.flags[i]; const iEP = nF & 16 ? `!3u${nIE}` : ''; const url = `!1m2!1s${p}!2u${nE}!2e${nTF}${iEP}!4b0`; return await decode(CMD_NODE, `NodeData/pb=${url}`, false); }, getPlanetoid: async (): Promise<Planetoid> => await decode(CMD_BULK, `PlanetoidMetadata`), getBulk: async (p: string, e: number): Promise<Bulk> => await decode(CMD_BULK, `BulkMetadata/pb=!1m2!1s${p}!2u${e}`), };
+    return {
+        bulk: bulkUtils, 
+        getNode: async (p: string, b: Bulk, i: number): Promise<NodePayload> => { const nE = b.epoch[i]; const nIE = b.imageryEpochArray ? b.imageryEpochArray[i] : b.defaultImageryEpoch; const nTF = b.textureFormatArray ? b.textureFormatArray[i] : b.defaultTextureFormat; const nF = b.flags[i]; const iEP = nF & 16 ? `!3u${nIE}` : ''; const url = `!1m2!1s${p}!2u${nE}!2e${nTF}${iEP}!4b0`; return await decode(CMD_NODE, `NodeData/pb=${url}`, false); },
+        getPlanetoid: async (): Promise<Planetoid> => await decode(CMD_BULK, `PlanetoidMetadata`),
+    
+    
+        getBulk: async (p: string, e: number): Promise<Bulk> => await decode(CMD_BULK, `BulkMetadata/pb=!1m2!1s${p}!2u${e}`), };
 };
 
 type Box = { n: number; s: number; w: number; e: number };
@@ -371,10 +377,13 @@ const useGoogle3DTile = (lat: number, lon: number) => {
 
                 const bestPath = allPaths.find(path => path.length === 18);
 
+                console.log("allPaths", allPaths);
+
                 if (!bestPath) {
                     console.error("在 allPaths 数组中未找到长度为18的路径");
                     return;
                 }
+               
 
                 setStatus(`使用最低层级路径 ${bestPath}，正在下载...`);
 
