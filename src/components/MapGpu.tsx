@@ -428,7 +428,7 @@ const Camera = ({children, initialCenter, initialRadius}: CameraProps) => (
 
 
 
-export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: number }> = ({ canvas, level, rings }) => {
+export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: number; lat: number; lon: number}> = ({ canvas, level, rings, lat, lon }) => {
   const { meshes, status, center, radius } = useGoogle3DTileWithLevelAndRings(30.3748035,  -81.5933274, level, rings);
 
   const textureUrls = useMemo(() => meshes.map(m => m.textureUrl), [meshes]);
@@ -719,10 +719,6 @@ export function tileToQuadKey(x: number, y: number, z: number) {
 
 
 const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel: number, rings: number) => {
-
-
-
-
 
             // 假设你有 lat/lon/wantedLevel/rings
         const z = Math.max(0, Math.min(23, Math.floor(wantedLevel))); // 保护一下层级
