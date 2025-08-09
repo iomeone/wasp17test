@@ -30,7 +30,7 @@ export const Map: React.FC = () => {
     <div ref={containerRef} className="relative flex w-full h-full">
       {/* GPU 渲染 */}
       <LiveCanvas>
-        {(canvas) => <MapGpu canvas={canvas}  />}
+        {(canvas) => <MapGpu canvas={canvas} level={level} />}
       </LiveCanvas>
 
 
