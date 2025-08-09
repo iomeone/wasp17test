@@ -711,6 +711,83 @@ function getSameParent8Neighbors(path: string): string[] {
 
 
 
+
+// —— 用 Morton 位加减，保证邻居严格相邻（不会乱跳）——
+function get8Neighbors(path: string): string[] {
+  // 顶层两位是 getFirstOctant 返回的 '02','21' 之类，后面每一位是 0..7
+  if (!path || path.length < 3) return [];
+  const L = path.length - 2; // 除去前2位的“象限头”，后面 L 位是四叉格层
+
+  // 取出“头两位”不动；后面的每位拆成 (high, xBit, yBit)
+  const head = path.slice(0, 2);
+  const high: number[] = new Array(L);
+  const xbits: number[] = new Array(L);
+  const ybits: number[] = new Array(L);
+  for (let i = 0; i < L; i++) {
+    const c = path.charCodeAt(2 + i) - 48;
+    high[i]  = c & 4;           // 保留该层的高位
+    const b  = c & 3;           // 低两位 0..3
+    xbits[i] =  b       & 1;    // 0:W, 1:E
+    ybits[i] = (b >> 1) & 1;    // 0:S, 1:N
+  }
+
+  // 把 (xbits[], ybits[]) 看成两个 L 位二进制数，做 +1/-1（带借位/进位）
+  function addBits(bits: number[], delta: number): boolean {
+    if (delta === 0) return true;
+    if (delta === 1) {
+      // 加一（从最低位开始）
+      for (let i = L - 1; i >= 0; i--) {
+        if (bits[i] === 0) { bits[i] = 1; return true; }
+        bits[i] = 0;
+      }
+      return false; // 溢出（已经在最右边了）
+    } else if (delta === -1) {
+      // 减一
+      for (let i = L - 1; i >= 0; i--) {
+        if (bits[i] === 1) { bits[i] = 0; return true; }
+        bits[i] = 1;
+      }
+      return false; // 下溢（已经在最左边了）
+    }
+    return false;
+  }
+
+  function buildPath(xb: number[], yb: number[]): string {
+    let s = head;
+    for (let i = 0; i < L; i++) {
+      const base = (yb[i] << 1) | xb[i];     // 0..3
+      s += String.fromCharCode(48 + (high[i] | base));
+    }
+    return s;
+  }
+
+  const out = new Set<string>();
+
+  // 4 邻 + 4 对角
+  const dirs = [
+    [-1, 0], [1, 0], [0,-1], [0, 1],
+    [-1,-1], [1,-1], [-1,1], [1, 1],
+  ];
+
+  for (const [dx, dy] of dirs) {
+    const X = xbits.slice();  // 拷贝
+    const Y = ybits.slice();
+    // 先在 X 方向做加减；失败表示越界（地图边缘）
+    if ((dx === 0 || addBits(X, dx)) && (dy === 0 || addBits(Y, dy))) {
+      out.add(buildPath(X, Y));
+    }
+  }
+
+  out.delete(path);
+  return [...out];
+}
+
+
+
+
+
+
+
 /** 角度转弧度 */
 const deg2rad = (d: number) => d * Math.PI / 180;
 
@@ -967,7 +1044,7 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
 
           // 扩展邻居
           if (ring < rings) {
-            const neigh = getSameParent8Neighbors(path);
+            const neigh = get8Neighbors(path);
             console.log(`[BFS][expand] ring=${ring} -> ${ring+1}，邻居数量=${neigh.length}`);
             for (const np of neigh) {
               if (!visited.has(np) && visited.size < HARD_CAP) {
