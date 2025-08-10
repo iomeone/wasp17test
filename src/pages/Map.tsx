@@ -26,8 +26,8 @@ export const Map: React.FC = () => {
   const [size, setSize] = useState({ width: 0, height: 0 });
 
   // ✅ 新增：中心点经纬度
-const [lat, setLat] = useState<number>(48.858370);  // 埃菲尔铁塔纬度
-const [lon, setLon] = useState<number>(2.294481);   // 埃菲尔铁塔经度
+const [lat, setLat] = useState<number>(37.7946);  
+const [lon, setLon] = useState<number>( -122.3999); 
 
   // UI state
   const [level, setLevel] = useState<number>(18);
