@@ -897,7 +897,7 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
     const hit = TILE_CACHE.get(key);
     if (hit) {
       touchLRU(key);
-      setMeshes(hit.meshes);
+      setMeshes(prev => [...prev, ...hit.meshes]);
       // setCenter(hit.center);
       // 只在第一次由缓存设半径；如果你不想改变现有 radius 逻辑可保留 hasFramed 判断
       // if (!hasFramed) {
@@ -1097,16 +1097,18 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
           if (!hasFramed) {
                 setRadius(newRadius);     // 只在第一次按包围盒设半径
                 setHasFramed(true);
+                setBounds({ min, max, center: newCenter, sizeVec, diag });
             } else {
             // 之后别动 radius（或者做很小幅度变化）
             // setRadius(prev => prev); // 等价什么都不做
             }
 
-            setBounds({ min, max, center: newCenter, sizeVec, diag });
+           
 
         }
 
-        setMeshes(extractedAll);
+        setMeshes(prev => [...prev, ...extractedAll]);
+
 
         const finalStatus = `渲染完成！tiles=${visited.size}, rings=${rings}, level=${effectiveLevel}`;
 

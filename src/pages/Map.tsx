@@ -127,16 +127,16 @@ const handleBounds = useCallback((b: Bounds) => {
 
   // 👉 关键：按“瓦片比例”移动（dxTiles/dyTiles 以瓦片为单位）
   const moveByTiles = useCallback((dxTiles: number, dyTiles: number) => {
-    const { x, y } = lonLatToTileXY(lat, lon, level);
-    const b = tileBounds(x, y, level);
-    const tileLonWidth = b.east - b.west;       // 一块瓦片的经度宽度
-    const tileLatHeight = b.north - b.south;    // 一块瓦片的纬度高度
-    setLon((prev) => wrapLon(prev + dxTiles * tileLonWidth));
-    setLat((prev) => clampLat(prev + dyTiles * tileLatHeight));
+    // const { x, y } = lonLatToTileXY(lat, lon, level);
+    // const b = tileBounds(x, y, level);
+    // const tileLonWidth = b.east - b.west;       // 一块瓦片的经度宽度
+    // const tileLatHeight = b.north - b.south;    // 一块瓦片的纬度高度
+    // setLon((prev) => wrapLon(prev + dxTiles * tileLonWidth));
+    // setLat((prev) => clampLat(prev + dyTiles * tileLatHeight));
 
-    moveByBounds(dxTiles, dyTiles, 0);
+     moveByBounds(dxTiles, dyTiles, 0);
 
-  }, [lat, lon, level]);
+  }, [lat, lon, level, moveByBounds]);
 
   // 👉 十字方向：上北(N)、下南(S)、左西(W)、右东(E)
   // 每次移动 0.35 个 tile，手感较明显，不至于跳得太远
@@ -189,7 +189,7 @@ const handleBounds = useCallback((b: Bounds) => {
             label={`邻居环数  (rings=${rings}${ringsManual ? ', 手动' : ', 自动'})`}
             step={1}
             minValue={0}
-            maxValue={4}
+            maxValue={100}
             value={rings}
             onChange={onRingsChange}
             showSteps={false}
