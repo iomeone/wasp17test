@@ -4,7 +4,9 @@ import { MapGpu } from '../components/MapGpu';
 import { Card, Button, Slider } from "@heroui/react";
 
 // 新增：从 MapGpu 导入工具函数
-import { lonLatToTileXY, tileBounds } from '../components/MapGpu';
+import { lonLatToTileXY, tileBounds, Bounds } from '../components/MapGpu';
+
+
 
 const translucent = {
   backdropFilter: 'saturate(180%) blur(8px)',
@@ -24,13 +26,68 @@ export const Map: React.FC = () => {
   const [size, setSize] = useState({ width: 0, height: 0 });
 
   // ✅ 新增：中心点经纬度
-  const [lat, setLat] = useState<number>(30.3748035);
-  const [lon, setLon] = useState<number>(-81.5933274);
+const [lat, setLat] = useState<number>(48.858370);  // 埃菲尔铁塔纬度
+const [lon, setLon] = useState<number>(2.294481);   // 埃菲尔铁塔经度
 
   // UI state
   const [level, setLevel] = useState<number>(18);
   const [rings, setRings] = useState<number>(1);
   const [ringsManual, setRingsManual] = useState<boolean>(false);
+
+
+
+  const [camTarget, setCamTarget] = useState<[number, number, number] | null>(null);
+  const [camRadius, setCamRadius] = useState<number | null>(null);
+  const [bounds, setBounds] = useState<Bounds | null>(null);
+
+
+const handleBounds = useCallback((b: Bounds) => {
+  setBounds(b);
+
+  setCamTarget(prev => {
+    // prev 为空：初始化到新中心
+    if (!prev) return [b.center[0], b.center[1], b.center[2]];
+    // 有 prev：如果不在新 bounds 内，重置到新中心；在的话保持不变
+    return isInsideBounds(prev, b) ? prev : [b.center[0], b.center[1], b.center[2]];
+  });
+
+  setCamRadius(prev => {
+    // 只有首次（prev 为空）或 camTarget 被重置（不在新 bounds 内）才设置半径
+    if (!prev) return Math.max(b.diag, 200);
+    // NOTE: 如果上面 camTarget 被重置，我们也希望同步半径：
+    // 这里读取一下最新 camTarget 判断是否刚刚被重置：
+    // 简化做法：以中心重置为准——若你想精确，只需把“是否重置”的布尔从上面传下来。
+    return prev; // 保持半径不变；如需同步重置，改为 Math.max(b.diag, 200)
+  });
+}, []);
+
+
+
+  const moveByBounds = useCallback((fx: number, fy: number, fz: number) => {
+    if (!bounds) return;
+    const dx = fx * bounds.sizeVec[0];
+    const dy = fy * bounds.sizeVec[1];
+    const dz = fz * bounds.sizeVec[2];
+    setCamTarget((prev) => {
+      const cur = prev ?? [bounds.center[0], bounds.center[1], bounds.center[2]];
+      return [cur[0] + dx, cur[1] + dy, cur[2] + dz] as [number, number, number];
+    });
+  }, [bounds]);
+
+
+
+  const isInsideBounds = (p: [number,number,number], b: Bounds) => {
+  const EPS = 1e-3;
+  return (
+    p[0] >= b.min[0] - EPS && p[0] <= b.max[0] + EPS &&
+    p[1] >= b.min[1] - EPS && p[1] <= b.max[1] + EPS &&
+    p[2] >= b.min[2] - EPS && p[2] <= b.max[2] + EPS
+  );
+};
+
+
+
+
 
   const onLevelChange = useCallback((val: number | number[]) => {
     const L = Array.isArray(val) ? val[0]! : val;
@@ -76,6 +133,9 @@ export const Map: React.FC = () => {
     const tileLatHeight = b.north - b.south;    // 一块瓦片的纬度高度
     setLon((prev) => wrapLon(prev + dxTiles * tileLonWidth));
     setLat((prev) => clampLat(prev + dyTiles * tileLatHeight));
+
+    moveByBounds(dxTiles, dyTiles, 0);
+
   }, [lat, lon, level]);
 
   // 👉 十字方向：上北(N)、下南(S)、左西(W)、右东(E)
@@ -174,6 +234,11 @@ export const Map: React.FC = () => {
             rings={rings}
             lat={lat}
             lon={lon}
+            cameraTarget={camTarget ?? undefined}
+            cameraRadius={camRadius ?? undefined}
+            onBoundsChange={handleBounds}
+
+
           />
         )}
       </LiveCanvas>

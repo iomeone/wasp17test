@@ -69,6 +69,21 @@ interface ProcessedMesh {
 }
 
 
+export type Bounds = {
+  min: vec3;
+  max: vec3;
+  center: vec3;
+  sizeVec: vec3;   // 分量尺寸 (max - min)
+  diag: number;    // 对角线长度
+};
+
+type CameraProps = PropsWithChildren<{
+  target?: vec3;
+  radius?: number;
+}>;
+
+
+
 const textureDecoder = (() => {
     function decodeDXT(buffer: DataView, width: number, height: number): Uint8Array { const rgba = new Uint8Array(width * height * 4); const blockCountX = Math.floor((width + 3) / 4); const blockCountY = Math.floor((height + 3) / 4); for (let j = 0; j < blockCountY; j++) { for (let i = 0; i < blockCountX; i++) { const blockOffset = (j * blockCountX + i) * 8; const color0 = buffer.getUint16(blockOffset, true); const color1 = buffer.getUint16(blockOffset + 2, true); const code = buffer.getUint32(blockOffset + 4, true); const r0 = (color0 >> 11) & 0x1F, g0 = (color0 >> 5) & 0x3F, b0 = color0 & 0x1F; const r1 = (color1 >> 11) & 0x1F, g1 = (color1 >> 5) & 0x3F, b1 = color1 & 0x1F; const colorTable: (number[] | undefined)[] = [[r0 << 3, g0 << 2, b0 << 3, 255], [r1 << 3, g1 << 2, b1 << 3, 255], [], []]; if (color0 > color1) { colorTable[2] = [(2 * r0 + r1) / 3 << 3, (2 * g0 + g1) / 3 << 2, (2 * b0 + b1) / 3 << 3, 255]; colorTable[3] = [(r0 + 2 * r1) / 3 << 3, (g0 + 2 * g1) / 3 << 2, (b0 + 2 * b1) / 3 << 3, 255]; } else { colorTable[2] = [(r0 + r1) / 2 << 3, (g0 + g1) / 2 << 2, (b0 + b1) / 2 << 3, 255]; colorTable[3] = [0, 0, 0, 0]; } for (let y = 0; y < 4; y++) { for (let x = 0; x < 4; x++) { const pixelIndex = (j * 4 + y) * width + (i * 4 + x); if (pixelIndex < width * height) { const color = colorTable[(code >> (2 * (4 * y + x))) & 0x03]; if (color) { rgba[pixelIndex * 4] = color[0]; rgba[pixelIndex * 4 + 1] = color[1]; rgba[pixelIndex * 4 + 2] = color[2]; rgba[pixelIndex * 4 + 3] = color[3]; } } } } } } return rgba; }
     const bmp = (() => { function encode(imgData: { data: number[] | Uint8Array, width: number, height: number }): { data: Uint8Array } { const width = imgData.width, height = imgData.height, data = imgData.data; const extraBytes = (4 - (width * 3) % 4) % 4; const fileSize = 54 + (width * 3 + extraBytes) * height; const buf = new ArrayBuffer(fileSize); const view = new DataView(buf); view.setUint16(0, 0x424D, false); view.setUint32(2, fileSize, true); view.setUint32(10, 54, true); view.setUint32(14, 40, true); view.setUint32(18, width, true); view.setUint32(22, height, true); view.setUint16(26, 1, true); view.setUint16(28, 24, true); view.setUint32(34, (width * 3 + extraBytes) * height, true); let p = 54; for (let y = height - 1; y >= 0; y--) { for (let x = 0; x < width; x++) { const i = (y * width + x) * 4; view.setUint8(p++, data[i + 2]); view.setUint8(p++, data[i + 1]); view.setUint8(p++, data[i]); } for (let i = 0; i < extraBytes; i++) { view.setUint8(p++, 0); } } return { data: new Uint8Array(buf) }; } return { encode }; })();
@@ -116,6 +131,9 @@ const textureDecoder = (() => {
     })();
 
 
+
+
+
 type TileCacheEntry = {
   meshes: ProcessedMesh[];
   status: string;
@@ -123,6 +141,8 @@ type TileCacheEntry = {
   urls: string[];
   // LRU 时间戳
   ts: number;
+
+  bounds?: Bounds;
 };
 
 const TILE_CACHE = new Map<string, TileCacheEntry>();
@@ -445,23 +465,11 @@ function getSameParentNeighbors(path: string): string[] {
 
 
 
-
-// ===================================================================
-// == 3. React 和 use.gpu 的集成组件
-// ===================================================================
-// ===================================================================
-// == 步骤 2: 修改 Camera 组件
-// ===================================================================
-type CameraProps = PropsWithChildren<{
-  initialCenter?: vec3;
-  initialRadius?: number;
-}>;
-
-const Camera = ({children, initialCenter, initialRadius}: CameraProps) => (
+const Camera = ({children, target, radius}: CameraProps) => (
   <OrbitControls
     // 使用传入的属性作为初始值，如果未提供则使用默认值
-    radius={initialRadius ?? 500}
-    target={initialCenter ?? [0, 0, 0]}
+    radius={radius ?? 500}
+    target={target ?? [0, 0, 0]}
     pitch={0.5}
     bearing={-0.5}
     render={(radius: number, phi: number, theta: number, target: vec3) => (
@@ -482,8 +490,50 @@ const Camera = ({children, initialCenter, initialRadius}: CameraProps) => (
 
 
 
-export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: number; lat: number; lon: number}> = ({ canvas, level, rings, lat, lon }) => {
-  const { meshes, status, center, radius } = useGoogle3DTileWithLevelAndRings(lat,  lon, level, rings);
+
+
+function computeBoundsFromMeshes(meshes: ProcessedMesh[]): Bounds | null {
+  if (!meshes || meshes.length === 0) return null;
+  let min: vec3 = [Infinity, Infinity, Infinity];
+  let max: vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const m of meshes) {
+    const a = m.vertices;
+    for (let i = 0; i < a.length; i += 3) {
+      if (a[i]   < min[0]) min[0] = a[i];
+      if (a[i+1] < min[1]) min[1] = a[i+1];
+      if (a[i+2] < min[2]) min[2] = a[i+2];
+      if (a[i]   > max[0]) max[0] = a[i];
+      if (a[i+1] > max[1]) max[1] = a[i+1];
+      if (a[i+2] > max[2]) max[2] = a[i+2];
+    }
+  }
+  const center = vec3.fromValues(
+    (min[0] + max[0]) / 2,
+    (min[1] + max[1]) / 2,
+    (min[2] + max[2]) / 2
+  );
+  const sizeVec = vec3.fromValues(max[0]-min[0], max[1]-min[1], max[2]-min[2]);
+  const diag = vec3.length(sizeVec);
+  return { min, max, center, sizeVec, diag };
+}
+
+
+
+
+
+
+
+export const MapGpu: LC<{ 
+  canvas: HTMLCanvasElement; 
+  level: number; 
+  rings: number; 
+  lat: number; 
+  lon: number
+  cameraTarget?: vec3;                 // 新增：外部受控 target
+  cameraRadius?: number;               // 新增：外部受控半径（可选）
+  onBoundsChange?: (b: Bounds) => void;// 新增：向外抛出 bounds
+}> = ({ canvas, level, rings, lat, lon, cameraTarget, cameraRadius, onBoundsChange}) => {
+  const { meshes, status, center, radius , bounds} = useGoogle3DTileWithLevelAndRings(lat,  lon, level, rings);
 
 //   const textureUrls = useMemo(() => meshes.map(m => m.textureUrl), [meshes]);
 
@@ -493,15 +543,24 @@ export const MapGpu: LC<{ canvas: HTMLCanvasElement; level: number; rings: numbe
 //       textureUrls.forEach(url => url && URL.revokeObjectURL(url));
 //     });
 //   }, [textureUrls]);
+  useResource(() => {
+    if (bounds && onBoundsChange) onBoundsChange(bounds);
+    return () => {};
+  }, [bounds, onBoundsChange]);
+
+
 
   return (
     <WebGPU fallback={<p>WebGPU is not supported.</p>}>
       <AutoCanvas canvas={canvas}>
-        <Camera initialCenter={center} initialRadius={radius}>
+        <Camera 
+          target={cameraTarget ?? center}
+          radius={cameraRadius ?? radius}
+        >
           <Scene>
             <Pass lights>
               <AmbientLight intensity={1.5} />
-              {/* <PointLight position={[center[0], center[1] + radius, center[2]]} intensity={0} /> */}
+              {/* useGoogle3DTileWithLevelAndRings<PointLight position={[center[0], center[1] + radius, center[2]]} intensity={0} /> */}
               {meshes.length > 0
                 ? meshes.map((mesh, i) => (
                   <GeometryData
@@ -808,6 +867,10 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
   const [meshes, setMeshes] = useState<ProcessedMesh[]>([]);
   const [status, setStatus] = useState('正在初始化...');
 
+  const [bounds, setBounds] = useState<Bounds | null>(null);
+
+
+
 //   useResource(() => {
 //     console.log('[状态]', status);
 //     return () => {};
@@ -841,6 +904,28 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
       //   setRadius(hit.radius);
       // }
       setStatus(hit.status + '（cache）');
+
+       if (hit.bounds) {
+          setBounds(hit.bounds);
+          // 可选：若需要在首次/未装框时同步相机，可放开下面两行
+          // setCenter(hit.bounds.center);
+          // if (!hasFramed) setRadius(Math.max(hit.bounds.diag, 200));
+        } else {
+          // ✅ 2) 缓存里还没有 bounds：用缓存的 meshes 现算，并回填缓存
+          const b = computeBoundsFromMeshes(hit.meshes);
+          if (b) {
+            setBounds(b);
+            // 可选：首次同步相机（按你的 hasFramed 逻辑决定是否放开）
+            // setCenter(b.center);
+            // if (!hasFramed) setRadius(Math.max(b.diag, 200));
+
+            // 回填缓存，避免下次再算
+            hit.bounds = b;
+            TILE_CACHE.set(key, hit);
+          }
+        }
+
+
 
       console.log("hit cache");
       return () => { isCancelled = true; };
@@ -1002,6 +1087,11 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
           const newCenter = vec3.fromValues((min[0]+max[0])/2, (min[1]+max[1])/2, (min[2]+max[2])/2);
           const size = vec3.distance(min, max);
           const newRadius = Math.max(size, 200);
+
+          const sizeVec = vec3.fromValues(max[0]-min[0], max[1]-min[1], max[2]-min[2]);
+          const diag = vec3.length(sizeVec);
+
+
           console.log(`[相机] 由 ${extractedAll.length} 个网格计算 -> center=${newCenter} radius=${newRadius}`);
           setCenter(newCenter);
           if (!hasFramed) {
@@ -1011,6 +1101,9 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
             // 之后别动 radius（或者做很小幅度变化）
             // setRadius(prev => prev); // 等价什么都不做
             }
+
+            setBounds({ min, max, center: newCenter, sizeVec, diag });
+
         }
 
         setMeshes(extractedAll);
@@ -1033,6 +1126,8 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
             status: finalStatus,
             urls,
             ts: Date.now(),
+            bounds: computeBoundsFromMeshes(extractedAll) ?? undefined, 
+
           });
           evictIfNeeded();
 
@@ -1053,5 +1148,5 @@ const useGoogle3DTileWithLevelAndRings = (lat: number, lon: number, wantedLevel:
     return () => { isCancelled = true; };
   }, [tileKey, rings]);
 
-  return { meshes, status, center, radius };
+  return { meshes, status, center, radius,bounds };
 };
