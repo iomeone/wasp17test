@@ -30,7 +30,7 @@ const [lat, setLat] = useState<number>(37.7946);
 const [lon, setLon] = useState<number>( -122.3999); 
 
   // UI state
-  const [level, setLevel] = useState<number>(18);
+  const [level, setLevel] = useState<number>(17);
   const [rings, setRings] = useState<number>(1);
   const [ringsManual, setRingsManual] = useState<boolean>(false);
 
