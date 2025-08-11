@@ -54,7 +54,10 @@ export const MapGpu: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
 
     return (
         <WebGPU fallback={<p>WebGPU is not supported.</p>}>
-            <AutoCanvas canvas={canvas} samples={4}>
+            <AutoCanvas 
+                canvas={canvas} 
+                samples={4}
+                backgroundColor={[.2, 0.2, 0.2, 1]} >
                 <Camera>
                     <Pass>
                         <Data data={data} schema={schema}>
