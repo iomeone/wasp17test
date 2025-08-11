@@ -68,13 +68,7 @@ export const MapGpu: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
                         }
                         </Data>
 
-                        {/* <Data
-                        schema={schema}
-                        data={data}
-                        render={({ positions, uvs, colors }) => (
-                            <FaceLayer positions={positions} uvs={uvs} colors={colors} />
-                        )}
-                        /> */}
+
                     </Pass>
                 </Camera>
             </AutoCanvas>
@@ -86,11 +80,28 @@ export const MapGpu: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
 
 
 
+
+
+//  <Data
+// schema={schema}
+// data={data}
+// render={({ positions, uvs, colors }) => (
+//     <FaceLayer positions={positions} uvs={uvs} colors={colors} />
+// )}
+// /> 
+
+
+
+
 //   const schema = useOne(() => ({
 //     positions: { prop: 'position', format: 'vec3<f32>' },
 //     uvs: { prop: 'uv', format: 'vec2<f32>' },
 //     colors:    { prop: 'color',    format: 'vec4<f32>' }, 
 //   }), []);
+
+
+
+
 
 //   const data = useOne(() => ([
 //     { position: [-.2, -.1, 0], uv: [0, 1], color: [1, 0, 0, 1] }, // 红
