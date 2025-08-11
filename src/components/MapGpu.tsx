@@ -4,11 +4,25 @@ import type { LC } from '@use-gpu/live';
 import type { GPUAttributes } from '@use-gpu/core';
 
 import { WebGPU, AutoCanvas } from '@use-gpu/webgpu';
-import { LinearRGB, Pass, Data, FaceLayer, OrbitCamera, ShaderFlatMaterial } from '@use-gpu/workbench';
+import { LinearRGB, Pass, Data, FaceLayer, OrbitCamera, ShaderFlatMaterial, useShader } from '@use-gpu/workbench';
 import { Cursor, FPSControls } from '@use-gpu/interact';
 
 import { vec3 } from 'gl-matrix';
 
+
+import { WGSLLinker } from '@use-gpu/shader';
+
+
+
+const redTintShader = WGSLLinker.wgsl`
+    @export fn main(
+    inColor: vec4<f32>,
+    mapUV: vec4<f32>,
+    mapST: vec4<f32>,
+    ) -> vec4<f32> {
+    return  vec4<f32>(0.0, 1.0, 0.0, 1.0);
+    }    
+`;
 
 
 const Camera = ({children}: PropsWithChildren<object>) => (
@@ -52,6 +66,11 @@ const schema = {
 
 export const MapGpu: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
 
+
+     const fragment = useShader(redTintShader, []);
+
+
+
     return (
         <WebGPU fallback={<p>WebGPU is not supported.</p>}>
             <AutoCanvas 
@@ -62,16 +81,15 @@ export const MapGpu: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
                     <Pass>
                         <Data data={data} schema={schema}>
                         {
-                            ({positions, uvs, colors}) => {
-                                return (
+                            ({positions, uvs, colors}) => (
+                               
+                                 <ShaderFlatMaterial fragment={fragment}>
                                     <FaceLayer positions={positions} uvs={uvs} colors={colors}  />
-                                );
-                            }
+                                 </ShaderFlatMaterial>
+                            )
                         
                         }
                         </Data>
-
-
                     </Pass>
                 </Camera>
             </AutoCanvas>
