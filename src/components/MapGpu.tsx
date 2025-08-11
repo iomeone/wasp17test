@@ -32,32 +32,29 @@ const Camera = ({children}: PropsWithChildren<object>) => (
   }</FPSControls>
 );
 
+const schema = {
+  positions: { prop: 'position', format: 'vec3<f32>' },
+  uvs:       { prop: 'uv',       format: 'vec2<f32>' },
+  colors:    { prop: 'color',    format: 'vec4<f32>' },
+};
+
+
+ const data= [
+  { position: [-.2, -.1, 0], uv: [0, 1], color: [1, 0, 0, 1] }, // 红
+  { position: [ .2, -.1, 0], uv: [1, 1], color: [0, 1, 0, 1] }, // 绿
+  { position: [ .2,  .1, 0], uv: [1, 0], color: [0, 0, 1, 1] }, // 蓝
+  { position: [-.2, -.1, 0], uv: [0, 1], color: [1, 0, 0, 1] },
+  { position: [ .2,  .1, 0], uv: [1, 0], color: [0, 0, 1, 1] },
+  { position: [-.2,  .1, 0], uv: [0, 0], color: [1, 1, 0, 1] }, // 黄
+];
 
 
 
 export const MapGpu: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
 
-
-  const schema = useOne(() => ({
-    positions: { prop: 'position', format: 'vec3<f32>' },
-    uvs: { prop: 'uv', format: 'vec2<f32>' },
-    colors:    { prop: 'color',    format: 'vec4<f32>' }, 
-  }), []);
-
-  const data = useOne(() => ([
-    { position: [-.2, -.1, 0], uv: [0, 1], color: [1, 0, 0, 1] }, // 红
-    { position: [ .2, -.1, 0], uv: [1, 1], color: [0, 1, 0, 1] }, // 绿
-    { position: [ .2,  .1, 0], uv: [1, 0], color: [0, 0, 1, 1] }, // 蓝
-    { position: [-.2, -.1, 0], uv: [0, 1], color: [1, 0, 0, 1] },
-    { position: [ .2,  .1, 0], uv: [1, 0], color: [0, 0, 1, 1] },
-    { position: [-.2,  .1, 0], uv: [0, 0], color: [1, 1, 0, 1] }, // 黄
-  ]), []);
-
-
-
     return (
         <WebGPU fallback={<p>WebGPU is not supported.</p>}>
-            <AutoCanvas canvas={canvas}>
+            <AutoCanvas canvas={canvas} samples={4}>
                 <Camera>
                     <Pass>
                         <Data data={data} schema={schema}>
@@ -84,3 +81,22 @@ export const MapGpu: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
         </WebGPU>
     );
 };
+
+
+
+
+
+//   const schema = useOne(() => ({
+//     positions: { prop: 'position', format: 'vec3<f32>' },
+//     uvs: { prop: 'uv', format: 'vec2<f32>' },
+//     colors:    { prop: 'color',    format: 'vec4<f32>' }, 
+//   }), []);
+
+//   const data = useOne(() => ([
+//     { position: [-.2, -.1, 0], uv: [0, 1], color: [1, 0, 0, 1] }, // 红
+//     { position: [ .2, -.1, 0], uv: [1, 1], color: [0, 1, 0, 1] }, // 绿
+//     { position: [ .2,  .1, 0], uv: [1, 0], color: [0, 0, 1, 1] }, // 蓝
+//     { position: [-.2, -.1, 0], uv: [0, 1], color: [1, 0, 0, 1] },
+//     { position: [ .2,  .1, 0], uv: [1, 0], color: [0, 0, 1, 1] },
+//     { position: [-.2,  .1, 0], uv: [0, 0], color: [1, 1, 0, 1] }, // 黄
+//   ]), []);
