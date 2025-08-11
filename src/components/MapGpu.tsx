@@ -61,12 +61,23 @@ export const MapGpu: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
                 <Camera>
                     <Pass>
                         <Data data={data} schema={schema}>
-                                {({positions, uvs, colors}) => {
-                                    return (
-                                        <FaceLayer positions={positions} uvs={uvs} colors={colors}  />
-                                    );
-                                }}
+                        {
+                            ({positions, uvs, colors}) => {
+                                return (
+                                    <FaceLayer positions={positions} uvs={uvs} colors={colors}  />
+                                );
+                            }
+                        
+                        }
                         </Data>
+
+                        {/* <Data
+                        schema={schema}
+                        data={data}
+                        render={({ positions, uvs, colors }) => (
+                            <FaceLayer positions={positions} uvs={uvs} colors={colors} />
+                        )}
+                        /> */}
                     </Pass>
                 </Camera>
             </AutoCanvas>
