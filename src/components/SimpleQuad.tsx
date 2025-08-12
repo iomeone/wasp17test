@@ -4,7 +4,9 @@ import type { LC } from '@use-gpu/live';
 import type { GPUAttributes } from '@use-gpu/core';
 
 import { WebGPU, AutoCanvas } from '@use-gpu/webgpu';
-import { LinearRGB, Pass, Data, FaceLayer, OrbitCamera, ShaderFlatMaterial, useShader, useShaderRef, useTimeContext , useAnimationFrame} from '@use-gpu/workbench';
+import { LinearRGB, Pass, Data, FaceLayer, OrbitCamera, 
+  ShaderFlatMaterial, useShader, useShaderRef, useTimeContext , 
+  useAnimationFrame, Time} from '@use-gpu/workbench';
 import { Cursor, FPSControls } from '@use-gpu/interact';
 
 
@@ -68,34 +70,49 @@ const schema = {
 
 
 
+
+
+const QuadContent: LC<{}> = () => {
+ 
+  useAnimationFrame();  
+  const time = useTimeContext();       
+  const getTimeRef = useShaderRef(time.elapsed); 
+  const fragment = useShader(redTintShader, [getTimeRef]);
+
+  return (
+    <Camera>
+      <Pass>
+        <Data data={data} schema={schema}>
+          {
+            ({positions, uvs, colors}) => (
+              <ShaderFlatMaterial fragment={fragment}>
+                <FaceLayer positions={positions} uvs={uvs} colors={colors} />
+              </ShaderFlatMaterial>
+            )
+          }
+        </Data>
+      </Pass>
+    </Camera>
+  );
+};
+
+
+
+
 export const QuadTest: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
 
-    const time = useTimeContext();
-    useAnimationFrame();
-    const t = useShaderRef(time.elapsed / 1000);
-     const fragment = useShader(redTintShader, [t]);
-     
+    console.log("QuadTest");
+
     return (
         <WebGPU fallback={<p>WebGPU is not supported.</p>}>
             <AutoCanvas 
                 canvas={canvas} 
                 samples={4}
                 backgroundColor={[.2, 0.2, 0.2, 1]} >
-                <Camera>
-                    <Pass>
-                        <Data data={data} schema={schema}>
-                        {
-                            ({positions, uvs, colors}) => (
-                               
-                                 <ShaderFlatMaterial fragment={fragment}>
-                                    <FaceLayer positions={positions} uvs={uvs} colors={colors}  />
-                                 </ShaderFlatMaterial>
-                            )
-                        
-                        }
-                        </Data>
-                    </Pass>
-                </Camera>
+
+
+                <QuadContent />
+
             </AutoCanvas>
         </WebGPU>
     );
