@@ -6,7 +6,7 @@ import type { GPUAttributes } from '@use-gpu/core';
 import { WebGPU, AutoCanvas } from '@use-gpu/webgpu';
 import { LinearRGB, Pass, Data, FaceLayer, OrbitCamera, 
   ShaderFlatMaterial, useShader, useShaderRef, useTimeContext , 
-  useAnimationFrame, Time} from '@use-gpu/workbench';
+  useAnimationFrame} from '@use-gpu/workbench';
 import { Cursor, FPSControls } from '@use-gpu/interact';
 
 
@@ -80,7 +80,6 @@ const QuadContent: LC<{}> = () => {
   const fragment = useShader(redTintShader, [getTimeRef]);
 
   return (
-    <Camera>
       <Pass>
         <Data data={data} schema={schema}>
           {
@@ -92,7 +91,6 @@ const QuadContent: LC<{}> = () => {
           }
         </Data>
       </Pass>
-    </Camera>
   );
 };
 
@@ -110,8 +108,10 @@ export const QuadTest: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
                 samples={4}
                 backgroundColor={[.2, 0.2, 0.2, 1]} >
 
-
-                <QuadContent />
+                <Camera>
+                  <QuadContent />
+                </Camera>
+                              
 
             </AutoCanvas>
         </WebGPU>
