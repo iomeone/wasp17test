@@ -1,6 +1,6 @@
 import React, { useState, useLayoutEffect, useRef } from 'react';
 import { LiveCanvas } from '@use-gpu/react';
-import { MapGpu } from '../components/MapGpu';
+import { QuadTest } from '../components/SimpleQuad';
 
 export const Map: React.FC = () => {
   // 1. 创建一个 ref 来引用我们的 div 容器
@@ -33,7 +33,7 @@ export const Map: React.FC = () => {
     <div  className="relative flex w-full h-full">
       <LiveCanvas >
         {/* 7. 现在，我们将从 state 中获取的 width 和 height 传递给 MyGpu */}
-        {(canvas) => <MapGpu canvas={canvas}  />}
+        {(canvas) => <QuadTest canvas={canvas}  />}
       </LiveCanvas>
     </div>
   );

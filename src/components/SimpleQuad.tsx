@@ -1,11 +1,12 @@
-// src/components/MapGpu.tsx
+// src/components/SimpleQuad.tsx
 import React, {useOne, PropsWithChildren} from '@use-gpu/live';
 import type { LC } from '@use-gpu/live';
 import type { GPUAttributes } from '@use-gpu/core';
 
 import { WebGPU, AutoCanvas } from '@use-gpu/webgpu';
-import { LinearRGB, Pass, Data, FaceLayer, OrbitCamera, ShaderFlatMaterial, useShader } from '@use-gpu/workbench';
+import { LinearRGB, Pass, Data, FaceLayer, OrbitCamera, ShaderFlatMaterial, useShader, useShaderRef, useTimeContext , useAnimationFrame} from '@use-gpu/workbench';
 import { Cursor, FPSControls } from '@use-gpu/interact';
+
 
 import { vec3 } from 'gl-matrix';
 
@@ -15,13 +16,16 @@ import { WGSLLinker } from '@use-gpu/shader';
 
 
 const redTintShader = WGSLLinker.wgsl`
-    @export fn main(
+ 
+  @optional @link fn getTime() -> f32 { return 0.0; }
+  @export fn main(
     inColor: vec4<f32>,
     mapUV: vec4<f32>,
     mapST: vec4<f32>,
-    ) -> vec4<f32> {
-    return  vec4<f32>(0.0, 1.0, 0.0, 1.0);
-    }    
+  ) -> vec4<f32> {
+    let t = getTime();
+    return vec4<f32>(0.0, abs(sin(t * 4.0)), 0.0, 1.0);
+  }
 `;
 
 
@@ -64,13 +68,13 @@ const schema = {
 
 
 
-export const MapGpu: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
+export const QuadTest: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
 
-
-     const fragment = useShader(redTintShader, []);
-
-
-
+    const time = useTimeContext();
+    useAnimationFrame();
+    const t = useShaderRef(time.elapsed / 1000);
+     const fragment = useShader(redTintShader, [t]);
+     
     return (
         <WebGPU fallback={<p>WebGPU is not supported.</p>}>
             <AutoCanvas 
