@@ -116,12 +116,12 @@ const TubeNeighbor: LC<{}> = () => {
         <Arrow
           positions={path}             // 静态折线骨架
           color={[1, 0.8, 0.2, 1]}     // 琥珀色
-          width={0.06}                 // 管粗（世界单位直径 ≈0.06）
+          width={0.01}                 // 管粗（世界单位直径 ≈0.06）
           depth={-1}                   // 用“世界厚度”，后续开阴影时很关键
           sides={10}                   // 截面多边形边数（越大越圆、面数越多）
           join="round"                 // 折点圆角
-          start                        // 首端封帽
-          end                          // 末端封帽
+          start={false}                // 首端封帽
+          end={false}                  // 末端封帽
           // shaded                     // 先不加光照，纯色更直观；后面进阶再开
           // shadow                      // 需要灯光+shadowMap 才有影子
         />
