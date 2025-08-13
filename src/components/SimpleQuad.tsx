@@ -15,7 +15,7 @@ import { vec3 } from 'gl-matrix';
 
 import { WGSLLinker } from '@use-gpu/shader';
 
-import { Plot, Arrow } from '@use-gpu/plot';
+import { Plot, Arrow, Line } from '@use-gpu/plot';
 
 
 
@@ -101,14 +101,25 @@ const QuadContent: LC<{}> = () => {
 
 
 const TubeNeighbor: LC<{}> = () => {
-  // 选了在 x≈0.55~0.85 范围，正好在你的 quad 右边一点点
-  const path: number[][] = [
-    [0.55, -0.25,  0.00],
-    [0.80, -0.05,  0.15],
-    [0.85,  0.15,  0.00],
-    [0.70,  0.25, -0.10],
-    [0.55,  0.10, -0.20],
-  ];
+ // 超简函数：生成一条在 x 方向推进的 3D 正弦曲线
+  function makeSinePath(
+    start: [number, number, number], // 起点 [x0,y0,z0]
+    dx: number,                      // x 方向总位移
+    steps: number                    // 采样点数（越多越平滑）
+  ): number[][] {
+    const pts: number[][] = [];
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);          // 0..1
+      const x = start[0] + dx * t;        // 从 x0 线性前进
+      const y = start[1] + 0.18 * Math.sin(2 * Math.PI * t); // 纵向起伏
+      const z = start[2] + 0.12 * Math.sin(Math.PI * t);     // 深度起伏
+      pts.push([x, y, z]);
+    }
+    return pts;
+  }
+
+  // 放在 quad 右侧一点点：从 (0.55,-0.15,0) 向右 0.35，32 个点
+  const path = makeSinePath([0.55, -0.15, 0], 0.35, 32);
 
   return (
 
