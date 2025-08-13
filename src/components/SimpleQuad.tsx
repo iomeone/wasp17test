@@ -15,6 +15,10 @@ import { vec3 } from 'gl-matrix';
 
 import { WGSLLinker } from '@use-gpu/shader';
 
+import { Plot, Arrow } from '@use-gpu/plot';
+
+
+
 
 
 const redTintShader = WGSLLinker.wgsl`
@@ -26,7 +30,7 @@ const redTintShader = WGSLLinker.wgsl`
     mapST: vec4<f32>,
   ) -> vec4<f32> {
     let t = getTime();
-    return vec4<f32>(0.0, abs(sin(t * 4.0)), 0.0, 1.0);
+    return vec4<f32>(0.0, abs(sin(t * 4.0))*.2, 0.0, 1.0);
   }
 `;
 
@@ -80,7 +84,7 @@ const QuadContent: LC<{}> = () => {
   const fragment = useShader(redTintShader, [getTimeRef]);
 
   return (
-      <Pass>
+
         <Data data={data} schema={schema}>
           {
             ({positions, uvs, colors}) => (
@@ -90,10 +94,41 @@ const QuadContent: LC<{}> = () => {
             )
           }
         </Data>
-      </Pass>
+
   );
 };
 
+
+
+const TubeNeighbor: LC<{}> = () => {
+  // 选了在 x≈0.55~0.85 范围，正好在你的 quad 右边一点点
+  const path: number[][] = [
+    [0.55, -0.25,  0.00],
+    [0.80, -0.05,  0.15],
+    [0.85,  0.15,  0.00],
+    [0.70,  0.25, -0.10],
+    [0.55,  0.10, -0.20],
+  ];
+
+  return (
+
+      <Plot>
+        <Arrow
+          positions={path}             // 静态折线骨架
+          color={[1, 0.8, 0.2, 1]}     // 琥珀色
+          width={0.06}                 // 管粗（世界单位直径 ≈0.06）
+          depth={-1}                   // 用“世界厚度”，后续开阴影时很关键
+          sides={10}                   // 截面多边形边数（越大越圆、面数越多）
+          join="round"                 // 折点圆角
+          start                        // 首端封帽
+          end                          // 末端封帽
+          // shaded                     // 先不加光照，纯色更直观；后面进阶再开
+          // shadow                      // 需要灯光+shadowMap 才有影子
+        />
+      </Plot>
+
+  );
+};
 
 
 
@@ -109,10 +144,11 @@ export const QuadTest: LC<{canvas: HTMLCanvasElement}> = ({ canvas  }) => {
                 backgroundColor={[.2, 0.2, 0.2, 1]} >
 
                 <Camera>
-                  <QuadContent />
+                  <Pass>
+                    <QuadContent />
+                    <TubeNeighbor />
+                  </Pass>
                 </Camera>
-                              
-
             </AutoCanvas>
         </WebGPU>
     );
