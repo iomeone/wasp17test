@@ -12,7 +12,7 @@ import { FPSControls } from '@use-gpu/interact';
 
 import { vec3 } from 'gl-matrix';
 import { WGSLLinker } from '@use-gpu/shader';
-import { Plot, Arrow } from '@use-gpu/plot';
+import { Plot, Arrow, Line } from '@use-gpu/plot';
 
 // ---- Fragment shader for the small quad (pulsing green tint) ----
 const redTintShader = WGSLLinker.wgsl`
@@ -147,9 +147,9 @@ const HelixNeighbor: LC<{}> = () => {
   return (
     <Plot>
       <PBRMaterial albedo={[0.25, 0.7, 1.0, 1]} roughness={0.35} metalness={0.0}>
-        <Arrow
+        <Line
           positions={path}
-          width={0.02}
+          width={0.1}
           depth={-1}     // 世界厚度（阴影需要）
           sides={14}
           join="tangent" // 螺旋用 tangent 更顺滑
