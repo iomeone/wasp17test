@@ -14,6 +14,164 @@ import { vec3 } from 'gl-matrix';
 import { WGSLLinker } from '@use-gpu/shader';
 import { Plot, Arrow, Line } from '@use-gpu/plot';
 
+
+
+
+
+
+
+
+
+
+
+const neonGridShader = WGSLLinker.wgsl`
+  @optional @link fn getTime() -> f32 { return 0.0; }
+
+  // 网格参数（可热改）
+  @optional @link fn getSpacing()     -> f32 { return 6.0; }   // 每世界单位多少格（越大越密）
+  @optional @link fn getCorePx()      -> f32 { return 2.0; }   // 核心线宽（像素）
+  @optional @link fn getGlowPx()      -> f32 { return 14.0; }  // 外发光宽度（像素）
+  @optional @link fn getMajorEvery()  -> f32 { return 6.0; }   // 每多少格作为“主网格”
+  @optional @link fn getMajorBoost()  -> f32 { return 1.6; }   // 主网格亮度加成
+
+  // 地平线位置（用世界 z = uv.y）
+  @optional @link fn getHStart() -> f32 { return 36.0; }  // 开始增亮
+  @optional @link fn getHEnd()   -> f32 { return 60.0; }  // 完全贴近地平
+
+  fn lineMask(d: f32, w: f32, aa: f32) -> f32 {
+    // 0..1 线条强度；d 为到最近线的距离（UV 空间）
+    return 1.0 - smoothstep(w - aa, w + aa, d);
+  }
+
+  @export fn main(
+    inColor: vec4<f32>,
+    mapUV: vec4<f32>,
+    mapST: vec4<f32>,
+  ) -> vec4<f32> {
+    let uv = mapUV.xy;        // 我们把 uv 当成世界 xz（x, z）
+    let s  = getSpacing();
+    let u  = uv * s;          // 重复空间
+
+    // 到最近“细网格线”的距离
+    let fu = fract(u);
+    let dv = min(fu.x, 1.0 - fu.x);
+    let dh = min(fu.y, 1.0 - fu.y);
+    let dMinor = min(dv, dh);
+
+    // 到最近“主网格线”的距离
+    let um = u / getMajorEvery();
+    let fm = fract(um);
+    let dmv = min(fm.x, 1.0 - fm.x);
+    let dmh = min(fm.y, 1.0 - fm.y);
+    let dMajor = min(dmv, dmh);
+
+    // 屏幕空间导数：把像素宽度换算成 UV 宽度
+    // fwidth 返回每像素 UV 的变化量，越远越小
+    let duv = fwidth(u);
+    let px2uv = max(min(duv.x, duv.y), 1e-5);
+
+    let coreW = getCorePx() * px2uv;
+    let glowW = getGlowPx() * px2uv;
+    let aa    = 1.0 * px2uv;
+
+    // 线条（主网格稍加粗）
+    let coreMinor = lineMask(dMinor, coreW, aa);
+    let glowMinor = lineMask(dMinor, glowW, aa * 2.0);
+
+    let coreMajor = lineMask(dMajor, coreW * 1.8, aa);
+    let glowMajor = lineMask(dMajor, glowW * 1.8, aa * 2.0);
+
+    // 组合：主网格比细网格更亮
+    let grid = max(glowMinor * 0.65 + coreMinor,
+                   (glowMajor * 0.75 + coreMajor) * getMajorBoost());
+
+    // 地平线光带 + 远处渐隐
+    let z = uv.y;                        // 前向距离
+    let hStart = getHStart();
+    let hEnd   = getHEnd();
+    let horizon  = smoothstep(hStart, hEnd, z);               // 越靠近地平线越亮
+    let fadeFar  = 1.0 - smoothstep(hEnd * 0.85, hEnd, z);    // 远处淡出
+
+    // 霓虹轻微闪烁（靠近地平线更明显）
+    let flicker = 0.92 + 0.08 * sin(getTime() * 22.0) * (0.7 + 0.3 * horizon);
+
+    // 颜色：深蓝底 + 青蓝霓虹
+    let base = mix(vec3<f32>(0.01, 0.02, 0.06),   // 近处更暗
+                   vec3<f32>(0.05, 0.09, 0.22),   // 远处略亮，接上地平线
+                   horizon);
+    let neon = vec3<f32>(0.12, 0.95, 1.00);
+
+    let color = base * (0.35 + 0.65 * fadeFar)
+              + neon * grid * (0.8 + 0.8 * horizon) * flicker;
+
+    return vec4<f32>(color, 1.0);
+  }
+`;
+
+// 生成一块大平面（位于 y = groundY，上朝 +Y）
+function makeGroundPlane(
+  halfW = 8,
+  depth = 20,
+  groundY = -0.22
+) {
+  const x0 = -halfW, x1 = halfW;
+  const z0 = 0.0,    z1 = depth;
+
+  return [
+    // 三角形1：(+Y 朝上)
+    { position:[x0, groundY, z0], uv:[x0, z0] },
+    { position:[x1, groundY, z1], uv:[x1, z1] },
+    { position:[x1, groundY, z0], uv:[x1, z0] },
+
+    // 三角形2：(+Y 朝上)
+    { position:[x0, groundY, z0], uv:[x0, z0] },
+    { position:[x0, groundY, z1], uv:[x0, z1] },
+    { position:[x1, groundY, z1], uv:[x1, z1] },
+  ];
+}
+
+const gridSchema = {
+  positions: { prop: 'position', format: 'vec3<f32>' },
+  uvs:       { prop: 'uv',       format: 'vec2<f32>' },
+};
+
+const NeonGrid: LC<{
+  y?: number; halfW?: number; depth?: number;
+  spacing?: number; lineWidth?: number; glowWidth?: number;
+}> = ({
+  y = -0.22, halfW = 8, depth = 22,
+  spacing = 10.0, lineWidth = 0.015, glowWidth = 0.08,
+}) => {
+  useAnimationFrame();
+  const time = useTimeContext();
+
+  // 参数下发到 shader（可热改）
+  const timeRef   = useShaderRef(time.elapsed);
+  const spacingRef= useShaderRef(spacing);
+  const lwRef     = useShaderRef(lineWidth);
+  const gwRef     = useShaderRef(glowWidth);
+
+  const fragment = useShader(neonGridShader, [timeRef, spacingRef, lwRef, gwRef]);
+
+  // 几何：一次生成即可
+  const plane = useOne(() => makeGroundPlane(halfW, depth, y), [halfW, depth, y]);
+
+  return (
+    <Data data={plane} schema={gridSchema}>
+      {({positions, uvs}) => (
+        <ShaderFlatMaterial fragment={fragment}>
+          <FaceLayer positions={positions} uvs={uvs} />
+        </ShaderFlatMaterial>
+      )}
+    </Data>
+  );
+};
+
+
+
+
+
+
 // ---- Fragment shader for the small quad (pulsing green tint) ----
 const redTintShader = WGSLLinker.wgsl`
   @optional @link fn getTime() -> f32 { return 0.0; }
@@ -42,6 +200,9 @@ const Camera = ({children}: PropsWithChildren<object>) => (
         theta={theta}
         target={target}
         scale={1080}
+
+        near = {0.01}
+        far = {100.0}
       >
         {children}
       </OrbitCamera>
@@ -191,6 +352,7 @@ const TubeNeighbor: LC<{}> = () => {
           depth={-1}
           sides={12}
           join="round"
+
           shaded
           shadow
         />
@@ -225,6 +387,16 @@ export const QuadTest: LC<{canvas: HTMLCanvasElement}> = ({ canvas }) => {
                   blur: 2,
                 }}
               />
+
+
+                <NeonGrid
+                  y={-0.22}      // 地面高度
+                  halfW={8}      // 左右宽度（越大越宽）
+                  depth={80}     // 向前延伸距离
+                  spacing={6.0}
+                  lineWidth={2.0 /* 像素：由 shader 内的 getCorePx 读取 */}
+                  glowWidth={14.0 /* 像素：由 shader 内的 getGlowPx 读取 */}
+                />
 
               {/* 内容 */}
               <QuadContent />
